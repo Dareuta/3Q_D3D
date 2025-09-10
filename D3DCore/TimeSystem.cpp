@@ -1,9 +1,12 @@
+#include "pch.h"
+
 //***************************************************************************************
 // GameTimer.cpp by Frank Luna (C) 2011 All Rights Reserved.
 //***************************************************************************************
 
 #include <windows.h>
 #include "TimeSystem.h"
+
 
 GameTimer* GameTimer::m_Instance = nullptr;
 
