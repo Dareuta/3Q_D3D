@@ -1,43 +1,42 @@
-#pragma once
+ï»¿#pragma once
 #include <windows.h>
 #include "../D3DCore/GameApp.h"
-#include <d3d11.h> // ID3D11Device, ¡¦Context, ¡¦Buffer µîÀ» Æ÷ÇÔ
+#include <d3d11.h> // ID3D11Device, â€¦Context, â€¦Buffer ë“±ì„ í¬í•¨
 
-#include <directxtk/SimpleMath.h> // °æ·® ¼öÇĞ Å¸ÀÔ(Vector2/3/4, Matrix µî)
-using namespace DirectX::SimpleMath; // ³²¹ßÇÏ¸é ¿À¿°µÊ ¾Æ¹«Æ° ¸¹ÀÌ ¾²Áö ¸¶¼À
+#include <directxtk/SimpleMath.h> // ê²½ëŸ‰ ìˆ˜í•™ íƒ€ì…(Vector2/3/4, Matrix ë“±)
+using namespace DirectX::SimpleMath; // ë‚¨ë°œí•˜ë©´ ì˜¤ì—¼ë¨ ì•„ë¬´íŠ¼ ë§ì´ ì“°ì§€ ë§ˆì…ˆ
 
 
 class TutorialApp : public GameApp
 {
 public:
 	/*
-	*	D3D ÇÊ¼ö 4Á¾.
-	*	Device: ¸®¼Ò½º »ı¼º¿ë ÆÑÅä¸®.
-	*	Immediate Context: µå·Î¿ì È£Ãâ/»óÅÂ ¼¼ÆÃ.
-	*	SwapChain: ¹é¹öÆÛ ±³È¯.
-	*	RTV: ¹é¹öÆÛ¸¦ ·»´õ Å¸±êÀ¸·Î ¾²±â À§ÇÑ ºä.
+	*	D3D í•„ìˆ˜ 4ì¢….
+	*	Device: ë¦¬ì†ŒìŠ¤ ìƒì„±ìš© íŒ©í† ë¦¬.
+	*	Immediate Context: ë“œë¡œìš° í˜¸ì¶œ/ìƒíƒœ ì„¸íŒ….
+	*	SwapChain: ë°±ë²„í¼ êµí™˜.
+	*	RTV: ë°±ë²„í¼ë¥¼ ë Œë” íƒ€ê¹ƒìœ¼ë¡œ ì“°ê¸° ìœ„í•œ ë·°.
 	*/
 	//================================================================================================
-	// ·»´õ¸µ ÆÄÀÌÇÁ¶óÀÎÀ» ±¸¼ºÇÏ´Â ÇÊ¼ö °´Ã¼ÀÇ ÀÎÅÍÆäÀÌ½º (  ‰X½º ½ºÅÙ½Ç ºäµµ ÀÖÁö¸¸ ¾ÆÁ÷ »ç¿ëÇÏÁö ¾Ê´Â´Ù.)
-	ID3D11Device* m_pDevice = nullptr;						// µğ¹ÙÀÌ½º
-	ID3D11DeviceContext* m_pDeviceContext = nullptr;		// Áï½Ã µğ¹ÙÀÌ½º ÄÁÅØ½ºÆ®
-	IDXGISwapChain* m_pSwapChain = nullptr;					// ½º¿ÒÃ¼ÀÎ
-	ID3D11RenderTargetView* m_pRenderTargetView = nullptr;	// ·»´õ¸µ Å¸°Ùºä
+	// ë Œë”ë§ íŒŒì´í”„ë¼ì¸ì„ êµ¬ì„±í•˜ëŠ” í•„ìˆ˜ ê°ì²´ì˜ ì¸í„°í˜ì´ìŠ¤ (  ëŠìŠ¤ ìŠ¤í…ì‹¤ ë·°ë„ ìˆì§€ë§Œ ì•„ì§ ì‚¬ìš©í•˜ì§€ ì•ŠëŠ”ë‹¤.)
+	ID3D11Device* m_pDevice = nullptr;						// ë””ë°”ì´ìŠ¤
+	ID3D11DeviceContext* m_pDeviceContext = nullptr;		// ì¦‰ì‹œ ë””ë°”ì´ìŠ¤ ì»¨í…ìŠ¤íŠ¸
+	IDXGISwapChain* m_pSwapChain = nullptr;					// ìŠ¤ì™‘ì²´ì¸
+	ID3D11RenderTargetView* m_pRenderTargetView = nullptr;	// ë Œë”ë§ íƒ€ê²Ÿë·°
 	//================================================================================================
 	
 
 	//================================================================================================	
-	// ·»´õ¸µ ÆÄÀÌÇÁ¶óÀÎ¿¡ Àû¿ëÇÏ´Â  °´Ã¼¿Í Á¤º¸
-	ID3D11VertexShader* m_pVertexShader = nullptr;	// Á¤Á¡ ¼ÎÀÌ´õ.
-	ID3D11PixelShader* m_pPixelShader = nullptr;	// ÇÈ¼¿ ¼ÎÀÌ´õ.	
-	ID3D11InputLayout* m_pInputLayout = nullptr;	// ÀÔ·Â ·¹ÀÌ¾Æ¿ô.
-	ID3D11Buffer* m_pVertexBuffer = nullptr;		// ¹öÅØ½º ¹öÆÛ.
-	UINT m_VertextBufferStride = 0;					// ¹öÅØ½º ÇÏ³ªÀÇ Å©±â.
-	UINT m_VertextBufferOffset = 0;					// ¹öÅØ½º ¹öÆÛÀÇ ¿ÀÇÁ¼Â.
-	ID3D11Buffer* m_pIndexBuffer = nullptr;			// ¹öÅØ½º ¹öÆÛ.
-	int m_nIndices = 0;								// ÀÎµ¦½º °³¼ö.
+	// ë Œë”ë§ íŒŒì´í”„ë¼ì¸ì— ì ìš©í•˜ëŠ”  ê°ì²´ì™€ ì •ë³´
+	ID3D11VertexShader* m_pVertexShader = nullptr;	// ì •ì  ì…°ì´ë”.
+	ID3D11PixelShader* m_pPixelShader = nullptr;	// í”½ì…€ ì…°ì´ë”.	
+	ID3D11InputLayout* m_pInputLayout = nullptr;	// ì…ë ¥ ë ˆì´ì•„ì›ƒ.
+	ID3D11Buffer* m_pVertexBuffer = nullptr;		// ë²„í…ìŠ¤ ë²„í¼.
+	UINT m_VertextBufferStride = 0;					// ë²„í…ìŠ¤ í•˜ë‚˜ì˜ í¬ê¸°.
+	UINT m_VertextBufferOffset = 0;					// ë²„í…ìŠ¤ ë²„í¼ì˜ ì˜¤í”„ì…‹.
+	ID3D11Buffer* m_pIndexBuffer = nullptr;			// ë²„í…ìŠ¤ ë²„í¼.
+	int m_nIndices = 0;								// ì¸ë±ìŠ¤ ê°œìˆ˜.
 	//================================================================================================
-
 
 	bool OnInitialize() override;
 	void OnUninitialize() override;
@@ -47,7 +46,7 @@ public:
 	bool InitD3D();
 	void UninitD3D();
 
-	bool InitScene();		// ½¦ÀÌ´õ,¹öÅØ½º,ÀÎµ¦½º
+	bool InitScene();		// ì‰ì´ë”,ë²„í…ìŠ¤,ì¸ë±ìŠ¤
 	void UninitScene();
 };
 
