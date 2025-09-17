@@ -30,6 +30,11 @@ bool TutorialApp::OnInitialize()
 	if (!InitD3D())
 		return false;
 
+#ifdef _DEBUG
+	if (!InitImGUI())
+		return false;
+#endif
+
 	if (!InitScene())
 		return false;
 
@@ -39,6 +44,11 @@ bool TutorialApp::OnInitialize()
 void TutorialApp::OnUninitialize()
 {
 	UninitScene();
+
+#ifdef _DEBUG
+	UninitImGUI();
+#endif
+
 	UninitD3D();
 }
 
@@ -169,6 +179,10 @@ void TutorialApp::OnRender()
 	//		UINT StartIndexLocation,	// 인덱스 버퍼에서 시작할 위치
 	//		INT BaseVertexLocation		// 정점 버퍼에서 시작할 위치(오프셋)
 	//	);
+
+#ifdef _DEBUG
+	UpdateImGUI();
+#endif
 
 
 	// Present the information rendered to the back buffer to the front buffer (the screen)
@@ -385,7 +399,7 @@ bool TutorialApp::InitScene()
 	// 쉐이더 파일을 읽어오는거
 
 	HR_T(m_pDevice->CreateInputLayout(layout, ARRAYSIZE(layout), // 위에서 설정한 layout 넣어주는거
-		vertexShaderBuffer->GetBufferPointer(), 
+		vertexShaderBuffer->GetBufferPointer(),
 		vertexShaderBuffer->GetBufferSize(),  // 쉐이더 정보 읽어온거에서 포인터랑 사이즈 받는듯
 		// 셰이더 바이트 코드임
 
@@ -405,9 +419,9 @@ bool TutorialApp::InitScene()
 	// 3. Render() 에서 파이프라인에 바인딩할  버텍스 셰이더 생성
 	HR_T(m_pDevice->CreateVertexShader(
 		vertexShaderBuffer->GetBufferPointer(),
-		vertexShaderBuffer->GetBufferSize(), 
+		vertexShaderBuffer->GetBufferSize(),
 		NULL, &m_pVertexShader));
-	
+
 	//CreateVertexShader의 원형
 	//	HRESULT CreateVertexShader(
 	//		const void* pShaderBytecode,          // 컴파일된 셰이더 바이트코드
@@ -457,4 +471,80 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pInputLayout);
 	SAFE_RELEASE(m_pVertexShader);
 	SAFE_RELEASE(m_pPixelShader);
+}
+
+//================================================================================================
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//================================================================================================
+
+//임꾸이
+
+bool TutorialApp::InitImGUI()
+{
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+
+	// 스타일
+	ImGui::StyleColorsDark();  // 다크 테마
+	// ImGui::StyleColorsLight(); // 라이트 테마도 가능
+
+	// 백엔드 연결
+	ImGui_ImplWin32_Init(m_hWnd);
+	ImGui_ImplDX11_Init(this->m_pDevice, this->m_pDeviceContext);
+	return true;
+}
+
+void TutorialApp::UninitImGUI()
+{
+	ImGui_ImplDX11_Shutdown();
+	ImGui_ImplWin32_Shutdown();
+	ImGui::DestroyContext();
+}
+
+void TutorialApp::UpdateImGUI()
+{
+	// (1) 새 프레임 시작
+	ImGui_ImplDX11_NewFrame();
+	ImGui_ImplWin32_NewFrame();
+	ImGui::NewFrame();
+
+	//================================================================================================
+	
+	// (2) 위젯들
+	ImGui::Begin("Problem_Solver_68");
+
+
+
+
+	static int counter = 0;
+	if (ImGui::Button("Click Me")) counter++;
+	static Vector4 m_ClearColor;
+	ImGui::Text("RikuhachimaAru");
+	ImGui::Text("counter = %d", counter);
+	ImGui::ColorEdit3("RGB", (float*)&m_ClearColor);     // R,G,B (0~1)
+	ImGui::SliderFloat("Alpha", &m_ClearColor.w, 0.0f, 1.0f);
+
+
+
+
+	ImGui::End();
+
+	//================================================================================================
+
+	// (3) 렌더링
+	ImGui::Render();
+	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+}
+
+#ifdef _DEBUG
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
+#endif
+
+LRESULT CALLBACK TutorialApp::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+#ifdef _DEBUG
+	if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
+		return true;
+#endif
+	return __super::WndProc(hWnd, message, wParam, lParam);
 }

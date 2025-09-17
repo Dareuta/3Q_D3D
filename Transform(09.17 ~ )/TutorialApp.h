@@ -6,6 +6,10 @@
 #include <directxtk/SimpleMath.h> // 경량 수학 타입(Vector2/3/4, Matrix 등)
 using namespace DirectX::SimpleMath; // 남발하면 오염됨 아무튼 많이 쓰지 마셈
 
+#include <imgui.h>
+#include <imgui_impl_win32.h>
+#include <imgui_impl_dx11.h>
+
 
 class TutorialApp : public GameApp
 {
@@ -45,6 +49,12 @@ public:
 
 	bool InitD3D();
 	void UninitD3D();
+	
+
+	bool InitImGUI();
+	void UninitImGUI();
+	void UpdateImGUI();
+	virtual LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
 	bool InitScene();		// 쉐이더,버텍스,인덱스
 	void UninitScene();
