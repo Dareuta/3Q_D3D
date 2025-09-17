@@ -1,4 +1,8 @@
-﻿#pragma once
+﻿//================================================================================================
+// TutorialApp.h
+//================================================================================================
+
+#pragma once
 #include <windows.h>
 #include "../D3DCore/GameApp.h"
 #include <d3d11.h> // ID3D11Device, …Context, …Buffer 등을 포함
@@ -41,6 +45,12 @@ public:
 	ID3D11Buffer* m_pIndexBuffer = nullptr;			// 버텍스 버퍼.
 	int m_nIndices = 0;								// 인덱스 개수.
 	//================================================================================================
+	// 추가한 뭐시기
+	ID3D11Buffer* m_pConstantBuffer = nullptr;			// 상수 버퍼.
+	Matrix                m_World;				// 월드좌표계 공간으로 변환을 위한 행렬.
+	Matrix                m_View;				// 뷰좌표계 공간으로 변환을 위한 행렬.
+	Matrix                m_Projection;			// 단위장치좌표계( Normalized Device Coordinate) 공간으로 변환을 위한 행렬.
+
 
 	bool OnInitialize() override;
 	void OnUninitialize() override;
