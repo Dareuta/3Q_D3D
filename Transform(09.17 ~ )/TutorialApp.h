@@ -48,6 +48,7 @@ public:
 	// 추가한 뭐시기
 	ID3D11Buffer* m_pConstantBuffer = nullptr;			// 상수 버퍼.
 	Matrix                m_World;				// 월드좌표계 공간으로 변환을 위한 행렬.
+	Matrix                m_World2;				// 월드좌표계 공간으로 변환을 위한 행렬.
 	Matrix                m_View;				// 뷰좌표계 공간으로 변환을 위한 행렬.
 	Matrix                m_Projection;			// 단위장치좌표계( Normalized Device Coordinate) 공간으로 변환을 위한 행렬.
 

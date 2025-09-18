@@ -24,7 +24,7 @@ struct Vertex
 };
 
 
-struct ConstantBuffer
+struct ConstantBuffer // 상수버퍼
 {
 	Matrix mWorld;
 	Matrix mView;
@@ -65,7 +65,7 @@ void TutorialApp::OnUpdate()
 	float t = GameTimer::m_Instance->TotalTime();
 
 	// 1st Cube: Rotate around the origin
-	m_World = XMMatrixRotationY(t);
+	m_World = XMMatrixRotationY(t); // 회전행렬 뱉어줌
 
 	// 2nd Cube:  Rotate around origin
 	XMMATRIX mSpin = XMMatrixRotationZ(-t);
@@ -73,7 +73,7 @@ void TutorialApp::OnUpdate()
 	XMMATRIX mTranslate = XMMatrixTranslation(-4.0f, 0.0f, 0.0f);
 	XMMATRIX mScale = XMMatrixScaling(0.3f, 0.3f, 0.3f);
 
-	//m_World2 = mScale * mSpin * mTranslate * mOrbit; // 스케일적용 -> R(제자리Y회전) -> 왼쪽으로 이동 ->  궤도회전  
+	m_World2 = mScale * mSpin * mTranslate * mOrbit; // 스케일적용 -> R(제자리Y회전) -> 왼쪽으로 이동 ->  궤도회전  
 
 }
 
@@ -82,17 +82,8 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->OMSetRenderTargets(1, &m_pRenderTargetView, NULL);
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
 
-
-	ConstantBuffer cb{};
-	cb.mWorld = XMMatrixTranspose(m_World);
-	cb.mView = XMMatrixTranspose(m_View);
-	cb.mProjection = XMMatrixTranspose(m_Projection);
-
-	m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
 	m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 	m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
-
-
 
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pVertexBuffer, &m_VertextBufferStride, &m_VertextBufferOffset);
@@ -100,10 +91,29 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->IASetIndexBuffer(m_pIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
 
 	m_pDeviceContext->VSSetShader(m_pVertexShader, nullptr, 0);
-
 	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
 
-	m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
+
+	ConstantBuffer cb{}; // MVP 상수버퍼임
+	{
+		cb.mWorld = XMMatrixTranspose(m_World2);
+		cb.mView = XMMatrixTranspose(m_View);
+		cb.mProjection = XMMatrixTranspose(m_Projection);
+
+		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
+	}
+
+	{
+		cb.mWorld = XMMatrixTranspose(m_World);
+		cb.mView = XMMatrixTranspose(m_View);
+		cb.mProjection = XMMatrixTranspose(m_Projection);
+
+		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
+	}
+
+
 
 #ifdef _DEBUG
 	UpdateImGUI();
@@ -117,7 +127,7 @@ void TutorialApp::OnRender()
 bool TutorialApp::InitScene()
 {
 	HRESULT hr = 0;
-	Vertex vertices[] = // Local or Object or Model Space    position
+	Vertex vertices[] =
 	{
 		{ Vector3(-1.0f, 1.0f, -1.0f),	Vector4(0.0f, 0.0f, 1.0f, 1.0f) },
 		{ Vector3(1.0f, 1.0f, -1.0f),	Vector4(0.0f, 1.0f, 0.0f, 1.0f) },
@@ -312,7 +322,7 @@ void TutorialApp::UpdateImGUI()
 	ImGui::Begin("Problem_Solver_68");
 
 	static int counter = 0;
-	if (ImGui::Button("Click Me")) counter++;	
+	if (ImGui::Button("Click Me")) counter++;
 
 	ImGui::Text("RikuhachimaAru");
 	ImGui::Text("counter = %d", counter);
