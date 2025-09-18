@@ -12,19 +12,23 @@
 // 정점 선언.
 struct Vertex
 {
-	Vector3 Pos;		// 정점 위치 정보.
-	Vector3 Normal;
+	Vector3 position;		// 정점 위치 정보.
+	Vector4 color;			// 정점 색상 정보.
+
+	Vertex(float x, float y, float z) : position(x, y, z) {}
+	Vertex(Vector3 position) : position(position) {}
+
+	Vertex(Vector3 position, Vector4 color)
+		: position(position), color(color) {
+	}
 };
+
 
 struct ConstantBuffer
 {
 	Matrix mWorld;
 	Matrix mView;
 	Matrix mProjection;
-
-	Vector4 vLightDir[2];
-	Vector4 vLightColor[2];
-	Vector4 vOutputColor;
 };
 
 bool TutorialApp::OnInitialize()
@@ -58,7 +62,18 @@ void TutorialApp::OnUninitialize()
 
 void TutorialApp::OnUpdate()
 {
+	float t = GameTimer::m_Instance->TotalTime();
 
+	// 1st Cube: Rotate around the origin
+	m_World = XMMatrixRotationY(t);
+
+	// 2nd Cube:  Rotate around origin
+	XMMATRIX mSpin = XMMatrixRotationZ(-t);
+	XMMATRIX mOrbit = XMMatrixRotationY(-t * 2.0f);
+	XMMATRIX mTranslate = XMMatrixTranslation(-4.0f, 0.0f, 0.0f);
+	XMMATRIX mScale = XMMatrixScaling(0.3f, 0.3f, 0.3f);
+
+	//m_World2 = mScale * mSpin * mTranslate * mOrbit; // 스케일적용 -> R(제자리Y회전) -> 왼쪽으로 이동 ->  궤도회전  
 
 }
 
@@ -72,9 +87,6 @@ void TutorialApp::OnRender()
 	cb.mWorld = XMMatrixTranspose(m_World);
 	cb.mView = XMMatrixTranspose(m_View);
 	cb.mProjection = XMMatrixTranspose(m_Projection);
-	cb.vLightDir[0] = Vector4(0, -1, 0, 0);
-	cb.vLightColor[0] = Vector4(1, 1, 1, 1);
-	cb.vOutputColor = Vector4(1, 1, 1, 1);
 
 	m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
 	m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
@@ -98,6 +110,113 @@ void TutorialApp::OnRender()
 #endif
 
 	m_pSwapChain->Present(0, 0);
+}
+
+//================================================================================================
+
+bool TutorialApp::InitScene()
+{
+	HRESULT hr = 0;
+	Vertex vertices[] = // Local or Object or Model Space    position
+	{
+		{ Vector3(-1.0f, 1.0f, -1.0f),	Vector4(0.0f, 0.0f, 1.0f, 1.0f) },
+		{ Vector3(1.0f, 1.0f, -1.0f),	Vector4(0.0f, 1.0f, 0.0f, 1.0f) },
+		{ Vector3(1.0f, 1.0f, 1.0f),	Vector4(0.0f, 1.0f, 1.0f, 1.0f) },
+		{ Vector3(-1.0f, 1.0f, 1.0f),	Vector4(1.0f, 0.0f, 0.0f, 1.0f) },
+		{ Vector3(-1.0f, -1.0f, -1.0f), Vector4(1.0f, 0.0f, 1.0f, 1.0f) },
+		{ Vector3(1.0f, -1.0f, -1.0f),	Vector4(1.0f, 1.0f, 0.0f, 1.0f) },
+		{ Vector3(1.0f, -1.0f, 1.0f),	Vector4(1.0f, 1.0f, 1.0f, 1.0f) },
+		{ Vector3(-1.0f, -1.0f, 1.0f),	Vector4(0.0f, 0.0f, 0.0f, 1.0f) },
+	};
+
+	D3D11_BUFFER_DESC vbDesc = {};
+	vbDesc.ByteWidth = sizeof(Vertex) * ARRAYSIZE(vertices);
+	vbDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	vbDesc.Usage = D3D11_USAGE_DEFAULT;
+	vbDesc.CPUAccessFlags = 0; // cpu 접근 금지
+
+	D3D11_SUBRESOURCE_DATA vbData = {};
+	vbData.pSysMem = vertices;
+
+	HR_T(m_pDevice->CreateBuffer(&vbDesc, &vbData, &m_pVertexBuffer));
+
+	m_VertextBufferStride = sizeof(Vertex);
+	m_VertextBufferOffset = 0;
+
+	D3D11_INPUT_ELEMENT_DESC layout[] =
+	{
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+	};
+
+	ID3D10Blob* vertexShaderBuffer = nullptr;
+	HR_T(CompileShaderFromFile(L"05_BasicVertexShader.hlsl", "main", "vs_4_0", &vertexShaderBuffer));
+
+	HR_T(m_pDevice->CreateInputLayout(layout, ARRAYSIZE(layout),
+		vertexShaderBuffer->GetBufferPointer(),
+		vertexShaderBuffer->GetBufferSize(),
+		&m_pInputLayout));
+
+	HR_T(m_pDevice->CreateVertexShader(
+		vertexShaderBuffer->GetBufferPointer(),
+		vertexShaderBuffer->GetBufferSize(),
+		NULL, &m_pVertexShader));
+
+	SAFE_RELEASE(vertexShaderBuffer);
+
+	WORD indices[] =
+	{
+		3,1,0,  2,1,3,
+		0,5,4,  1,5,0,
+		3,4,7,  0,4,3,
+		1,6,5,  2,6,1,
+		2,7,6,  3,7,2,
+		6,4,5,  7,4,6,
+	};
+
+	m_nIndices = ARRAYSIZE(indices);
+
+	D3D11_BUFFER_DESC ibDesc = {};
+	ibDesc.ByteWidth = sizeof(WORD) * ARRAYSIZE(indices);
+	ibDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	ibDesc.Usage = D3D11_USAGE_DEFAULT;
+	ibDesc.CPUAccessFlags = 0; // cpu접근 금지
+
+	D3D11_SUBRESOURCE_DATA ibData = {};
+	ibData.pSysMem = indices;
+	HR_T(m_pDevice->CreateBuffer(&ibDesc, &ibData, &m_pIndexBuffer));
+
+	ID3D10Blob* pixelShaderBuffer = nullptr;
+	HR_T(CompileShaderFromFile(L"05_BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
+	HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
+		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShader));
+	SAFE_RELEASE(pixelShaderBuffer);
+
+	// 6. Render() 에서 파이프라인에 바인딩할 상수 버퍼 생성	
+	ibDesc.Usage = D3D11_USAGE_DEFAULT;
+	ibDesc.ByteWidth = sizeof(ConstantBuffer);
+	ibDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	ibDesc.CPUAccessFlags = 0;
+	HR_T(m_pDevice->CreateBuffer(&ibDesc, nullptr, &m_pConstantBuffer));
+
+	// 초기값설정
+	m_World = XMMatrixIdentity();
+	XMVECTOR Eye = XMVectorSet(0.0f, 4.0f, -10.0f, 0.0f);
+	XMVECTOR At = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	m_View = XMMatrixLookAtLH(Eye, At, Up);
+	m_Projection = XMMatrixPerspectiveFovLH(XM_PIDIV4, m_ClientWidth / (FLOAT)m_ClientHeight, 0.01f, 100.0f);
+
+	return true;
+}
+
+void TutorialApp::UninitScene()
+{
+	SAFE_RELEASE(m_pVertexBuffer);
+	SAFE_RELEASE(m_pIndexBuffer);
+	SAFE_RELEASE(m_pInputLayout);
+	SAFE_RELEASE(m_pVertexShader);
+	SAFE_RELEASE(m_pPixelShader);
 }
 
 //================================================================================================
@@ -164,131 +283,6 @@ void TutorialApp::UninitD3D()
 	SAFE_RELEASE(m_pDevice);
 }
 
-bool TutorialApp::InitScene()
-{
-	HRESULT hr = 0;
-	Vertex vertices[] =
-	{
-		{ Vector3(-1.0f, 1.0f, -1.0f),	Vector3(0.0f, 1.0f, 0.0f) },// Normal Y +	 
-		{ Vector3(1.0f, 1.0f, -1.0f),	Vector3(0.0f, 1.0f, 0.0f) },
-		{ Vector3(1.0f, 1.0f, 1.0f),	Vector3(0.0f, 1.0f, 0.0f) },
-		{ Vector3(-1.0f, 1.0f, 1.0f),	Vector3(0.0f, 1.0f, 0.0f) },
-
-		{ Vector3(-1.0f, -1.0f, -1.0f), Vector3(0.0f, -1.0f, 0.0f) },// Normal Y -		
-		{ Vector3(1.0f, -1.0f, -1.0f),	Vector3(0.0f, -1.0f, 0.0f) },
-		{ Vector3(1.0f, -1.0f, 1.0f),	Vector3(0.0f, -1.0f, 0.0f) },
-		{ Vector3(-1.0f, -1.0f, 1.0f),	Vector3(0.0f, -1.0f, 0.0f) },
-
-		{ Vector3(-1.0f, -1.0f, 1.0f),	Vector3(-1.0f, 0.0f, 0.0f) },//	Normal X -
-		{ Vector3(-1.0f, -1.0f, -1.0f), Vector3(-1.0f, 0.0f, 0.0f) },
-		{ Vector3(-1.0f, 1.0f, -1.0f),	Vector3(-1.0f, 0.0f, 0.0f) },
-		{ Vector3(-1.0f, 1.0f, 1.0f),	Vector3(-1.0f, 0.0f, 0.0f) },
-
-		{ Vector3(1.0f, -1.0f, 1.0f),	Vector3(1.0f, 0.0f, 0.0f) },// Normal X +
-		{ Vector3(1.0f, -1.0f, -1.0f),	Vector3(1.0f, 0.0f, 0.0f) },
-		{ Vector3(1.0f, 1.0f, -1.0f),	Vector3(1.0f, 0.0f, 0.0f) },
-		{ Vector3(1.0f, 1.0f, 1.0f),	Vector3(1.0f, 0.0f, 0.0f) },
-
-		{ Vector3(-1.0f, -1.0f, -1.0f), Vector3(0.0f, 0.0f, -1.0f) }, // Normal Z -
-		{ Vector3(1.0f, -1.0f, -1.0f),	Vector3(0.0f, 0.0f, -1.0f) },
-		{ Vector3(1.0f, 1.0f, -1.0f),	Vector3(0.0f, 0.0f, -1.0f) },
-		{ Vector3(-1.0f, 1.0f, -1.0f),	Vector3(0.0f, 0.0f, -1.0f) },
-
-		{ Vector3(-1.0f, -1.0f, 1.0f),	Vector3(0.0f, 0.0f, 1.0f) },// Normal Z +
-		{ Vector3(1.0f, -1.0f, 1.0f),	Vector3(0.0f, 0.0f, 1.0f) },
-		{ Vector3(1.0f, 1.0f, 1.0f),	Vector3(0.0f, 0.0f, 1.0f) },
-		{ Vector3(-1.0f, 1.0f, 1.0f),	Vector3(0.0f, 0.0f, 1.0f) },
-	};
-
-	D3D11_BUFFER_DESC vbDesc = {};
-	vbDesc.ByteWidth = sizeof(Vertex) * ARRAYSIZE(vertices);
-	vbDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-	vbDesc.Usage = D3D11_USAGE_DEFAULT;
-	vbDesc.CPUAccessFlags = 0; // cpu 접근 금지
-
-	D3D11_SUBRESOURCE_DATA vbData = {};
-	vbData.pSysMem = vertices;
-
-	HR_T(m_pDevice->CreateBuffer(&vbDesc, &vbData, &m_pVertexBuffer));
-
-	m_VertextBufferStride = sizeof(Vertex);
-	m_VertextBufferOffset = 0;
-
-	D3D11_INPUT_ELEMENT_DESC layout[] =
-	{
-		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-	};
-
-	ID3D10Blob* vertexShaderBuffer = nullptr;
-	HR_T(CompileShaderFromFile(L"06_BasicVertexShader.hlsl", "main", "vs_4_0", &vertexShaderBuffer));
-
-	HR_T(m_pDevice->CreateInputLayout(layout, ARRAYSIZE(layout),
-		vertexShaderBuffer->GetBufferPointer(),
-		vertexShaderBuffer->GetBufferSize(),
-		&m_pInputLayout));
-
-	HR_T(m_pDevice->CreateVertexShader(
-		vertexShaderBuffer->GetBufferPointer(),
-		vertexShaderBuffer->GetBufferSize(),
-		NULL, &m_pVertexShader));
-
-	SAFE_RELEASE(vertexShaderBuffer);
-
-	WORD indices[] =
-	{
-		3,1,0,		2,1,3,
-		6,4,5,		7,4,6,
-		11,9,8,		10,9,11,
-		14,12,13,	15,12,14,
-		19,17,16,	18,17,19,
-		22,20,21,	23,20,22
-	};
-
-	m_nIndices = ARRAYSIZE(indices);
-
-	D3D11_BUFFER_DESC ibDesc = {};
-	ibDesc.ByteWidth = sizeof(WORD) * ARRAYSIZE(indices);
-	ibDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
-	ibDesc.Usage = D3D11_USAGE_DEFAULT;
-	ibDesc.CPUAccessFlags = 0; // cpu접근 금지
-
-	D3D11_SUBRESOURCE_DATA ibData = {};
-	ibData.pSysMem = indices;
-	HR_T(m_pDevice->CreateBuffer(&ibDesc, &ibData, &m_pIndexBuffer));
-
-	ID3D10Blob* pixelShaderBuffer = nullptr;
-	HR_T(CompileShaderFromFile(L"06_BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
-	HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
-		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShader));
-	SAFE_RELEASE(pixelShaderBuffer);
-
-	// 6. Render() 에서 파이프라인에 바인딩할 상수 버퍼 생성	
-	ibDesc.Usage = D3D11_USAGE_DEFAULT;
-	ibDesc.ByteWidth = sizeof(ConstantBuffer);
-	ibDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-	ibDesc.CPUAccessFlags = 0;
-	HR_T(m_pDevice->CreateBuffer(&ibDesc, nullptr, &m_pConstantBuffer));
-
-	// 초기값설정
-	m_World = XMMatrixIdentity();
-	XMVECTOR Eye = XMVectorSet(0.0f, 4.0f, -10.0f, 0.0f);
-	XMVECTOR At = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-	XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-	m_View = XMMatrixLookAtLH(Eye, At, Up);
-	m_Projection = XMMatrixPerspectiveFovLH(XM_PIDIV4, m_ClientWidth / (FLOAT)m_ClientHeight, 0.01f, 100.0f);
-
-	return true;
-}
-
-void TutorialApp::UninitScene()
-{
-	SAFE_RELEASE(m_pVertexBuffer);
-	SAFE_RELEASE(m_pIndexBuffer);
-	SAFE_RELEASE(m_pInputLayout);
-	SAFE_RELEASE(m_pVertexShader);
-	SAFE_RELEASE(m_pPixelShader);	
-}
 
 bool TutorialApp::InitImGUI()
 {
@@ -318,7 +312,8 @@ void TutorialApp::UpdateImGUI()
 	ImGui::Begin("Problem_Solver_68");
 
 	static int counter = 0;
-	if (ImGui::Button("Click Me")) counter++;
+	if (ImGui::Button("Click Me")) counter++;	
+
 	ImGui::Text("RikuhachimaAru");
 	ImGui::Text("counter = %d", counter);
 	ImGui::ColorEdit3("RGB", color);
