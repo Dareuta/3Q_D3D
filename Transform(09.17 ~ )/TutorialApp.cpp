@@ -18,9 +18,7 @@ struct Vertex
 	Vertex(float x, float y, float z) : position(x, y, z) {}
 	Vertex(Vector3 position) : position(position) {}
 
-	Vertex(Vector3 position, Vector4 color)
-		: position(position), color(color) {
-	}
+	Vertex(Vector3 position, Vector4 color) : position(position), color(color) {}
 };
 
 
@@ -64,56 +62,78 @@ void TutorialApp::OnUpdate()
 {
 	float t = GameTimer::m_Instance->TotalTime();
 
-	// 1st Cube: Rotate around the origin
-	m_World = XMMatrixRotationY(t); // 회전행렬 뱉어줌
+	XMMATRIX mSpin = XMMatrixRotationY(t * spinSpeed);	
 
-	// 2nd Cube:  Rotate around origin
-	XMMATRIX mSpin = XMMatrixRotationZ(-t);
-	XMMATRIX mOrbit = XMMatrixRotationY(-t * 2.0f);
-	XMMATRIX mTranslate = XMMatrixTranslation(-4.0f, 0.0f, 0.0f);
-	XMMATRIX mScale = XMMatrixScaling(0.3f, 0.3f, 0.3f);
+	XMMATRIX mScaleA = XMMatrixScaling(cubeScale.x, cubeScale.y, cubeScale.z);
+	XMMATRIX mScaleB = XMMatrixScaling(cubeScale.x * 0.6f, cubeScale.y * 0.6f, cubeScale.z * 0.6f);
+	XMMATRIX mScaleC = XMMatrixScaling(cubeScale.x * 0.3f, cubeScale.y * 0.3f, cubeScale.z * 0.3f);
 
-	m_World2 = mScale * mSpin * mTranslate * mOrbit; // 스케일적용 -> R(제자리Y회전) -> 왼쪽으로 이동 ->  궤도회전  
+	XMMATRIX mTranslateA = XMMatrixTranslation(cubeTransformA.x, cubeTransformA.y, cubeTransformA.z);
+	XMMATRIX mTranslateB = XMMatrixTranslation(cubeTransformB.x, cubeTransformB.y, cubeTransformB.z);
+	XMMATRIX mTranslateC = XMMatrixTranslation(cubeTransformC.x, cubeTransformC.y, cubeTransformC.z);
 
+	//1번째 큐브
+	XMMATRIX tmpA = mSpin * mTranslateA;
+	m_World = mScaleA * tmpA;
+
+	//2번째 큐브
+	XMMATRIX tmpB = mSpin * mTranslateB * tmpA;
+	m_World_A = mScaleB * tmpB;
+
+	//3번째 큐브
+	XMMATRIX tmpC = mSpin * mTranslateC * tmpB;
+	m_World_B = mScaleC * tmpC;
 }
+
+//================================================================================================
 
 void TutorialApp::OnRender()
 {
-	m_pDeviceContext->OMSetRenderTargets(1, &m_pRenderTargetView, NULL);
+	//OM
+	m_pDeviceContext->OMSetRenderTargets(1, &m_pRenderTargetView, m_pDepthStencilView);
+	//Clear
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
+	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
-	m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
-	m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
-
+	//IA
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pVertexBuffer, &m_VertextBufferStride, &m_VertextBufferOffset);
 	m_pDeviceContext->IASetInputLayout(m_pInputLayout);
 	m_pDeviceContext->IASetIndexBuffer(m_pIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
-
+	//VS
+	m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 	m_pDeviceContext->VSSetShader(m_pVertexShader, nullptr, 0);
+	//PS
+	m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
 
+	//================================================================================================
+
+	Matrix cam;
+	m_Camera.GetViewMatrix(cam);
 
 	ConstantBuffer cb{}; // MVP 상수버퍼임
-	{
-		cb.mWorld = XMMatrixTranspose(m_World2);
-		cb.mView = XMMatrixTranspose(m_View);
-		cb.mProjection = XMMatrixTranspose(m_Projection);
 
-		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
-		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
-	}
+	cb.mView = XMMatrixTranspose(cam);
+	cb.mProjection = XMMatrixTranspose(m_Projection);
 
 	{
 		cb.mWorld = XMMatrixTranspose(m_World);
-		cb.mView = XMMatrixTranspose(m_View);
-		cb.mProjection = XMMatrixTranspose(m_Projection);
-
 		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
 		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 	}
 
+	{
+		cb.mWorld = XMMatrixTranspose(m_World_A);
+		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
+	}
 
+	{
+		cb.mWorld = XMMatrixTranspose(m_World_B);
+		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
+	}
 
 #ifdef _DEBUG
 	UpdateImGUI();
@@ -127,16 +147,25 @@ void TutorialApp::OnRender()
 bool TutorialApp::InitScene()
 {
 	HRESULT hr = 0;
-	Vertex vertices[] =
-	{
-		{ Vector3(-1.0f, 1.0f, -1.0f),	Vector4(0.0f, 0.0f, 1.0f, 1.0f) },
-		{ Vector3(1.0f, 1.0f, -1.0f),	Vector4(0.0f, 1.0f, 0.0f, 1.0f) },
-		{ Vector3(1.0f, 1.0f, 1.0f),	Vector4(0.0f, 1.0f, 1.0f, 1.0f) },
-		{ Vector3(-1.0f, 1.0f, 1.0f),	Vector4(1.0f, 0.0f, 0.0f, 1.0f) },
-		{ Vector3(-1.0f, -1.0f, -1.0f), Vector4(1.0f, 0.0f, 1.0f, 1.0f) },
-		{ Vector3(1.0f, -1.0f, -1.0f),	Vector4(1.0f, 1.0f, 0.0f, 1.0f) },
-		{ Vector3(1.0f, -1.0f, 1.0f),	Vector4(1.0f, 1.0f, 1.0f, 1.0f) },
-		{ Vector3(-1.0f, -1.0f, 1.0f),	Vector4(0.0f, 0.0f, 0.0f, 1.0f) },
+
+	const float hTop = 1.4f;   // 위 꼭짓점 높이
+	const float hBot = 1.4f;   // 아래 꼭짓점 깊이
+	const float r = 1.0f;   // 가운데 링 반경
+		
+	const float PHI = (1.0f + sqrtf(5.0f)) * 0.5f; // 황금비
+	Vertex vertices[] = {
+		{ { -1,  PHI,  0 }, {1.0f, 0.0f, 0.0f, 1.0f} }, // 0  Red
+		{ {  1,  PHI,  0 }, {0.0f, 1.0f, 0.0f, 1.0f} }, // 1  Green
+		{ { -1, -PHI,  0 }, {0.0f, 0.0f, 1.0f, 1.0f} }, // 2  Blue
+		{ {  1, -PHI,  0 }, {1.0f, 1.0f, 0.0f, 1.0f} }, // 3  Yellow
+		{ {  0, -1,  PHI }, {1.0f, 0.0f, 1.0f, 1.0f} }, // 4  Magenta
+		{ {  0,  1,  PHI }, {0.0f, 1.0f, 1.0f, 1.0f} }, // 5  Cyan
+		{ {  0, -1, -PHI }, {1.0f, 0.5f, 0.0f, 1.0f} }, // 6  Orange
+		{ {  0,  1, -PHI }, {0.6f, 0.0f, 1.0f, 1.0f} }, // 7  Purple
+		{ {  PHI,  0, -1 }, {0.5f, 1.0f, 0.0f, 1.0f} }, // 8  Lime
+		{ {  PHI,  0,  1 }, {0.0f, 0.7f, 0.7f, 1.0f} }, // 9  Teal
+		{ { -PHI,  0, -1 }, {1.0f, 0.4f, 0.7f, 1.0f} }, // 10 Pink
+		{ { -PHI,  0,  1 }, {0.9f, 0.9f, 0.9f, 1.0f} }, // 11 Light Gray
 	};
 
 	D3D11_BUFFER_DESC vbDesc = {};
@@ -174,14 +203,11 @@ bool TutorialApp::InitScene()
 
 	SAFE_RELEASE(vertexShaderBuffer);
 
-	WORD indices[] =
-	{
-		3,1,0,  2,1,3,
-		0,5,4,  1,5,0,
-		3,4,7,  0,4,3,
-		1,6,5,  2,6,1,
-		2,7,6,  3,7,2,
-		6,4,5,  7,4,6,
+	WORD indices[] = {
+		0,11,5,   0,5,1,    0,1,7,    0,7,10,   0,10,11,
+		1,5,9,    5,11,4,   11,10,2,  10,7,6,   7,1,8,
+		3,9,4,    3,4,2,    3,2,6,    3,6,8,    3,8,9,
+		4,9,5,    2,4,11,   6,2,10,   8,6,7,    9,8,1
 	};
 
 	m_nIndices = ARRAYSIZE(indices);
@@ -209,12 +235,12 @@ bool TutorialApp::InitScene()
 	ibDesc.CPUAccessFlags = 0;
 	HR_T(m_pDevice->CreateBuffer(&ibDesc, nullptr, &m_pConstantBuffer));
 
-	// 초기값설정
+	// 초기값설정 (MVP)
 	m_World = XMMatrixIdentity();
-	XMVECTOR Eye = XMVectorSet(0.0f, 4.0f, -10.0f, 0.0f);
-	XMVECTOR At = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-	XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-	m_View = XMMatrixLookAtLH(Eye, At, Up);
+	//XMVECTOR Eye = XMVectorSet(0.0f, 4.0f, -10.0f, 0.0f);
+	//XMVECTOR At = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	//XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	//m_View = XMMatrixLookAtLH(Eye, At, Up); // 카메라로 대체함
 	m_Projection = XMMatrixPerspectiveFovLH(XM_PIDIV4, m_ClientWidth / (FLOAT)m_ClientHeight, 0.01f, 100.0f);
 
 	return true;
@@ -270,7 +296,34 @@ bool TutorialApp::InitD3D()
 	HR_T(m_pDevice->CreateRenderTargetView(pBackBufferTexture, NULL, &m_pRenderTargetView));
 	SAFE_RELEASE(pBackBufferTexture);
 
-	m_pDeviceContext->OMSetRenderTargets(1, &m_pRenderTargetView, NULL);
+	//==============================================================================================
+
+	D3D11_TEXTURE2D_DESC dsDesc = {};
+	dsDesc.Width = m_ClientWidth;
+	dsDesc.Height = m_ClientHeight;
+	dsDesc.MipLevels = 1;
+	dsDesc.ArraySize = 1;
+	dsDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; // 흔한 조합
+	dsDesc.SampleDesc.Count = 1;  // 스왑체인과 동일하게
+	dsDesc.SampleDesc.Quality = 0;
+	dsDesc.Usage = D3D11_USAGE_DEFAULT;
+	dsDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+
+	HR_T(m_pDevice->CreateTexture2D(&dsDesc, nullptr, &m_pDepthStencil));
+	HR_T(m_pDevice->CreateDepthStencilView(m_pDepthStencil, nullptr, &m_pDepthStencilView));
+
+	D3D11_DEPTH_STENCIL_DESC dss = {};
+	dss.DepthEnable = TRUE;
+	dss.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+	dss.DepthFunc = D3D11_COMPARISON_LESS_EQUAL; // 스카이박스 쓸거면 LEQUAL이 편함. 기본은 LESS
+	dss.StencilEnable = FALSE;
+	HR_T(m_pDevice->CreateDepthStencilState(&dss, &m_pDepthStencilState));
+	m_pDeviceContext->OMSetDepthStencilState(m_pDepthStencilState, 0);
+
+
+	//==============================================================================================
+
+	m_pDeviceContext->OMSetRenderTargets(1, &m_pRenderTargetView, m_pDepthStencilView);
 
 	D3D11_VIEWPORT viewport = {};
 	viewport.TopLeftX = 0;
@@ -287,12 +340,16 @@ bool TutorialApp::InitD3D()
 
 void TutorialApp::UninitD3D()
 {
+	SAFE_RELEASE(m_pDepthStencilState);
+	SAFE_RELEASE(m_pDepthStencilView);
+	SAFE_RELEASE(m_pDepthStencil);
 	SAFE_RELEASE(m_pRenderTargetView);
 	SAFE_RELEASE(m_pDeviceContext);
 	SAFE_RELEASE(m_pSwapChain);
 	SAFE_RELEASE(m_pDevice);
 }
 
+//================================================================================================
 
 bool TutorialApp::InitImGUI()
 {
@@ -319,21 +376,35 @@ void TutorialApp::UpdateImGUI()
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
 
-	ImGui::Begin("Problem_Solver_68");
+	ImGui::Begin("Majesty Han's IMGUI");
 
-	static int counter = 0;
-	if (ImGui::Button("Click Me")) counter++;
-
-	ImGui::Text("RikuhachimaAru");
-	ImGui::Text("counter = %d", counter);
+	ImGui::Text("[BackGround Color]");
 	ImGui::ColorEdit3("RGB", color);
-	//ImGui::SliderFloat("Alpha", &m_ClearColor.w, 0.0f, 1.0f);
+
+	ImGui::Text("[Transform A]");
+	ImGui::DragFloat3("-10.0f ~ 10.0f##1", (float*)&cubeTransformA, 0.5f, -10.0f, 10.0f);
+
+	ImGui::Text("[Transform B]");
+	ImGui::DragFloat3("-10.0f ~ 10.0f##2", (float*)&cubeTransformB, 0.5f, -10.0f, 10.0f);
+
+	ImGui::Text("[Transform C]");
+	ImGui::DragFloat3("-10.0f ~ 10.0f##3", (float*)&cubeTransformC, 0.5f, -10.0f, 10.0f);
+
+	ImGui::Text("[Scale]");
+	ImGui::DragFloat3("-10.0f ~ 10.0f##4", (float*)&cubeScale, 0.5f, -10.0f, 10.0f);
+	ImGui::Text("[SpinSpeed]");
+	ImGui::SliderFloat("0.0f ~ 100.0f", &spinSpeed, 0.0f, 100.0f);
+	ImGui::Text("[Camera Control]");
+	ImGui::Text("[Mouse Right Button + WASD]");
+	
 
 	ImGui::End();
 
 	ImGui::Render();
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 }
+
+//================================================================================================
 
 #ifdef _DEBUG
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);

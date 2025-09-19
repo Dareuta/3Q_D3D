@@ -32,7 +32,7 @@ public:
 	IDXGISwapChain* m_pSwapChain = nullptr;					// 스왑체인
 	ID3D11RenderTargetView* m_pRenderTargetView = nullptr;	// 렌더링 타겟뷰
 	//================================================================================================
-	
+
 
 	//================================================================================================	
 	// 렌더링 파이프라인에 적용하는  객체와 정보
@@ -47,10 +47,16 @@ public:
 	//================================================================================================
 	// 추가한 뭐시기
 	ID3D11Buffer* m_pConstantBuffer = nullptr;			// 상수 버퍼.
-	Matrix                m_World;				// 월드좌표계 공간으로 변환을 위한 행렬.
-	Matrix                m_World2;				// 월드좌표계 공간으로 변환을 위한 행렬.
-	Matrix                m_View;				// 뷰좌표계 공간으로 변환을 위한 행렬.
-	Matrix                m_Projection;			// 단위장치좌표계( Normalized Device Coordinate) 공간으로 변환을 위한 행렬.
+	XMMATRIX                m_World;				// 월드좌표계 공간으로 변환을 위한 행렬.
+	XMMATRIX                m_World_A;				// 월드좌표계 공간으로 변환을 위한 행렬.
+	XMMATRIX                m_World_B;				// 월드좌표계 공간으로 변환을 위한 행렬.
+
+	XMMATRIX                m_View;				// 뷰좌표계 공간으로 변환을 위한 행렬.
+	XMMATRIX                m_Projection;			// 단위장치좌표계( Normalized Device Coordinate) 공간으로 변환을 위한 행렬.
+
+	ID3D11Texture2D* m_pDepthStencil = nullptr;
+	ID3D11DepthStencilView* m_pDepthStencilView = nullptr;
+	ID3D11DepthStencilState* m_pDepthStencilState = nullptr;
 
 
 	bool OnInitialize() override;
@@ -60,7 +66,6 @@ public:
 
 	bool InitD3D();
 	void UninitD3D();
-	
 
 	bool InitImGUI();
 	void UninitImGUI();
@@ -72,14 +77,12 @@ public:
 	//================================================================================================
 
 private:
-	float color[4] = { 0.0f, 0.5f, 0.5f, 1.0f };
+	float color[3] = { 0.1f, 0.11f, 0.13f};
+	float spinSpeed = 1.0f;
 
-
-
-
-
-
-
-
+	Vector3 cubeScale = { 0.7f, 0.7f, 0.7f };
+	Vector3 cubeTransformA = { 0.0f, 0.0f, 0.0f };	
+	Vector3 cubeTransformB = { 5.0f, 0.0f, 0.0f };
+	Vector3 cubeTransformC = { 3.0f, 0.0f, 0.0f };
 };
 
