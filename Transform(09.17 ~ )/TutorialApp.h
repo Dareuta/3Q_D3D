@@ -47,12 +47,12 @@ public:
 	//================================================================================================
 	// 추가한 뭐시기
 	ID3D11Buffer* m_pConstantBuffer = nullptr;			// 상수 버퍼.
-	XMMATRIX                m_World;				// 월드좌표계 공간으로 변환을 위한 행렬.
-	XMMATRIX                m_World_A;				// 월드좌표계 공간으로 변환을 위한 행렬.
-	XMMATRIX                m_World_B;				// 월드좌표계 공간으로 변환을 위한 행렬.
+	XMMATRIX m_World;				// 월드좌표계 공간으로 변환을 위한 행렬.
+	XMMATRIX m_World_A;				// 월드좌표계 공간으로 변환을 위한 행렬.
+	XMMATRIX m_World_B;				// 월드좌표계 공간으로 변환을 위한 행렬.
 
-	XMMATRIX                m_View;				// 뷰좌표계 공간으로 변환을 위한 행렬.
-	XMMATRIX                m_Projection;			// 단위장치좌표계( Normalized Device Coordinate) 공간으로 변환을 위한 행렬.
+	XMMATRIX m_View;				// 뷰좌표계 공간으로 변환을 위한 행렬.
+	XMMATRIX m_Projection;			// 단위장치좌표계( Normalized Device Coordinate) 공간으로 변환을 위한 행렬.
 
 	ID3D11Texture2D* m_pDepthStencil = nullptr;
 	ID3D11DepthStencilView* m_pDepthStencilView = nullptr;
@@ -77,11 +77,15 @@ public:
 	//================================================================================================
 
 private:
-	float color[3] = { 0.1f, 0.11f, 0.13f};
+	float color[3] = { 0.1f, 0.11f, 0.13f };
 	float spinSpeed = 1.0f;
 
+	float m_FovDegree = 60.0f;    // degrees
+	float m_Near = 0.01f;
+	float m_Far = 40.0f;
+
 	Vector3 cubeScale = { 0.7f, 0.7f, 0.7f };
-	Vector3 cubeTransformA = { 0.0f, 0.0f, 0.0f };	
+	Vector3 cubeTransformA = { 0.0f, 0.0f, 0.0f };
 	Vector3 cubeTransformB = { 5.0f, 0.0f, 0.0f };
 	Vector3 cubeTransformC = { 3.0f, 0.0f, 0.0f };
 };

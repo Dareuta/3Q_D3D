@@ -62,7 +62,7 @@ void TutorialApp::OnUpdate()
 {
 	float t = GameTimer::m_Instance->TotalTime();
 
-	XMMATRIX mSpin = XMMatrixRotationY(t * spinSpeed);	
+	XMMATRIX mSpin = XMMatrixRotationY(t * spinSpeed);
 
 	XMMATRIX mScaleA = XMMatrixScaling(cubeScale.x, cubeScale.y, cubeScale.z);
 	XMMATRIX mScaleB = XMMatrixScaling(cubeScale.x * 0.6f, cubeScale.y * 0.6f, cubeScale.z * 0.6f);
@@ -108,6 +108,20 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
 
 	//================================================================================================
+	
+	if (m_FovDegree < 10.0f)      m_FovDegree = 10.0f;
+	else if (m_FovDegree > 120.0f) m_FovDegree = 120.0f;
+
+	// 최소값 보장
+	if (m_Near < 0.0001f) m_Near = 0.0001f;
+
+	// Near보다 약간 더 크게
+	float minFar = m_Near + 0.001f;
+	if (m_Far < minFar) m_Far = minFar;
+
+	float aspect = m_ClientWidth / (float)m_ClientHeight;
+	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
+	//================================================================================================
 
 	Matrix cam;
 	m_Camera.GetViewMatrix(cam);
@@ -151,7 +165,7 @@ bool TutorialApp::InitScene()
 	const float hTop = 1.4f;   // 위 꼭짓점 높이
 	const float hBot = 1.4f;   // 아래 꼭짓점 깊이
 	const float r = 1.0f;   // 가운데 링 반경
-		
+
 	const float PHI = (1.0f + sqrtf(5.0f)) * 0.5f; // 황금비
 	Vertex vertices[] = {
 		{ { -1,  PHI,  0 }, {1.0f, 0.0f, 0.0f, 1.0f} }, // 0  Red
@@ -241,7 +255,9 @@ bool TutorialApp::InitScene()
 	//XMVECTOR At = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 	//XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 	//m_View = XMMatrixLookAtLH(Eye, At, Up); // 카메라로 대체함
-	m_Projection = XMMatrixPerspectiveFovLH(XM_PIDIV4, m_ClientWidth / (FLOAT)m_ClientHeight, 0.01f, 100.0f);
+
+	float aspect = m_ClientWidth / (FLOAT)m_ClientHeight;
+	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
 
 	return true;
 }
@@ -376,7 +392,7 @@ void TutorialApp::UpdateImGUI()
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
 
-	ImGui::Begin("Majesty Han's IMGUI");
+	ImGui::Begin("Majesty Han's IMGUI"); // 임꾸이
 
 	ImGui::Text("[BackGround Color]");
 	ImGui::ColorEdit3("RGB", color);
@@ -396,7 +412,14 @@ void TutorialApp::UpdateImGUI()
 	ImGui::SliderFloat("0.0f ~ 100.0f", &spinSpeed, 0.0f, 100.0f);
 	ImGui::Text("[Camera Control]");
 	ImGui::Text("[Mouse Right Button + WASD]");
-	
+
+	ImGui::Text("[Fov]");
+	ImGui::SliderFloat("10.0f ~ 120.0f", &m_FovDegree, 10.0f, 120.0f);
+	ImGui::Text("[Near]");
+	ImGui::DragFloat("default : 0.001f", &m_Near, 0.01f, 0.001f, 100.0f);
+	ImGui::Text("[Far]");
+	ImGui::DragFloat("default : 1.0f", &m_Far, 0.01f, 1.0f, 5000.0f);
+
 
 	ImGui::End();
 
