@@ -12,13 +12,10 @@
 // 정점 선언.
 struct Vertex
 {
-	Vector3 position;		// 정점 위치 정보.
-	Vector4 color;			// 정점 색상 정보.
-
-	Vertex(float x, float y, float z) : position(x, y, z) {}
-	Vertex(Vector3 position) : position(position) {}
-
-	Vertex(Vector3 position, Vector4 color) : position(position), color(color) {}
+	Vector3 position;
+	Vector3 normal;
+	Vertex() = default;
+	Vertex(Vector3 p, Vector3 n) : position(p), normal(n) {}
 };
 
 
@@ -27,6 +24,10 @@ struct ConstantBuffer // 상수버퍼
 	Matrix mWorld;
 	Matrix mView;
 	Matrix mProjection;
+
+	Vector4 vLightDir[2]; // 한번에 2개의 광원을 처리하게 설계해서 2개짜리임
+	Vector4 vLightColor[2];
+	Vector4 vOutputColor; 
 };
 
 bool TutorialApp::OnInitialize()
@@ -72,15 +73,15 @@ void TutorialApp::OnUpdate()
 	XMMATRIX mTranslateB = XMMatrixTranslation(cubeTransformB.x, cubeTransformB.y, cubeTransformB.z);
 	XMMATRIX mTranslateC = XMMatrixTranslation(cubeTransformC.x, cubeTransformC.y, cubeTransformC.z);
 
-	//1번째 큐브
+	//오브젝트
 	XMMATRIX tmpA = mSpin * mTranslateA;
 	m_World = mScaleA * tmpA;
 
-	//2번째 큐브
+	//광원
 	XMMATRIX tmpB = mSpin * mTranslateB * tmpA;
 	m_World_A = mScaleB * tmpB;
 
-	//3번째 큐브
+	//광원 2
 	XMMATRIX tmpC = mSpin * mTranslateC * tmpB;
 	m_World_B = mScaleC * tmpC;
 }
@@ -108,7 +109,7 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
 
 	//================================================================================================
-	
+
 	if (m_FovDegree < 10.0f)      m_FovDegree = 10.0f;
 	else if (m_FovDegree > 120.0f) m_FovDegree = 120.0f;
 
@@ -131,23 +132,36 @@ void TutorialApp::OnRender()
 	cb.mView = XMMatrixTranspose(cam);
 	cb.mProjection = XMMatrixTranspose(m_Projection);
 
+	cb.vLightDir[0] = Vector4(-0.3f, -1.0f, -0.2f, 0.0f); // 정규화 권장
+	cb.vLightDir[1] = Vector4(0.8f, 0.4f, 0.1f, 0.0f);
+	cb.vLightColor[0] = Vector4(1.0f, 1.0f, 1.0f, 1.0f);    // 흰색광
+	cb.vLightColor[1] = Vector4(1.0f, 0.6f, 0.3f, 1.0f);    // 주황빛
+
+	cb.vOutputColor = Vector4(0, 0, 0, 0);
+
 	{
 		cb.mWorld = XMMatrixTranspose(m_World);
 		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+		m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+		m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 	}
 
 	{
 		cb.mWorld = XMMatrixTranspose(m_World_A);
 		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+		m_pDeviceContext->PSSetShader(m_pPixelShaderSolid, nullptr, 0);
 		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 	}
 
 	{
 		cb.mWorld = XMMatrixTranspose(m_World_B);
 		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+		m_pDeviceContext->PSSetShader(m_pPixelShaderSolid, nullptr, 0);
 		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 	}
+
+	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
 
 #ifdef _DEBUG
 	UpdateImGUI();
@@ -167,20 +181,25 @@ bool TutorialApp::InitScene()
 	const float r = 1.0f;   // 가운데 링 반경
 
 	const float PHI = (1.0f + sqrtf(5.0f)) * 0.5f; // 황금비
+
 	Vertex vertices[] = {
-		{ { -1,  PHI,  0 }, {1.0f, 0.0f, 0.0f, 1.0f} }, // 0  Red
-		{ {  1,  PHI,  0 }, {0.0f, 1.0f, 0.0f, 1.0f} }, // 1  Green
-		{ { -1, -PHI,  0 }, {0.0f, 0.0f, 1.0f, 1.0f} }, // 2  Blue
-		{ {  1, -PHI,  0 }, {1.0f, 1.0f, 0.0f, 1.0f} }, // 3  Yellow
-		{ {  0, -1,  PHI }, {1.0f, 0.0f, 1.0f, 1.0f} }, // 4  Magenta
-		{ {  0,  1,  PHI }, {0.0f, 1.0f, 1.0f, 1.0f} }, // 5  Cyan
-		{ {  0, -1, -PHI }, {1.0f, 0.5f, 0.0f, 1.0f} }, // 6  Orange
-		{ {  0,  1, -PHI }, {0.6f, 0.0f, 1.0f, 1.0f} }, // 7  Purple
-		{ {  PHI,  0, -1 }, {0.5f, 1.0f, 0.0f, 1.0f} }, // 8  Lime
-		{ {  PHI,  0,  1 }, {0.0f, 0.7f, 0.7f, 1.0f} }, // 9  Teal
-		{ { -PHI,  0, -1 }, {1.0f, 0.4f, 0.7f, 1.0f} }, // 10 Pink
-		{ { -PHI,  0,  1 }, {0.9f, 0.9f, 0.9f, 1.0f} }, // 11 Light Gray
+		{ { -1,  PHI,  0 },  Vector3(-1,  PHI,  0) },
+		{ {  1,  PHI,  0 },  Vector3(1,  PHI,  0) },
+		{ { -1, -PHI,  0 },  Vector3(-1, -PHI,  0) },
+		{ {  1, -PHI,  0 },  Vector3(1, -PHI,  0) },
+		{ {  0, -1,  PHI },  Vector3(0, -1,  PHI) },
+		{ {  0,  1,  PHI },  Vector3(0,  1,  PHI) },
+		{ {  0, -1, -PHI },  Vector3(0, -1, -PHI) },
+		{ {  0,  1, -PHI },  Vector3(0,  1, -PHI) },
+		{ {  PHI,  0, -1 },  Vector3(PHI,  0, -1) },
+		{ {  PHI,  0,  1 },  Vector3(PHI,  0,  1) },
+		{ { -PHI,  0, -1 },  Vector3(-PHI,  0, -1) },
+		{ { -PHI,  0,  1 },  Vector3(-PHI,  0,  1) },
 	};
+
+	for (auto& v : vertices) {
+		v.normal.Normalize();
+	}
 
 	D3D11_BUFFER_DESC vbDesc = {};
 	vbDesc.ByteWidth = sizeof(Vertex) * ARRAYSIZE(vertices);
@@ -199,11 +218,11 @@ bool TutorialApp::InitScene()
 	D3D11_INPUT_ELEMENT_DESC layout[] =
 	{
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+		{ "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
 	};
 
 	ID3D10Blob* vertexShaderBuffer = nullptr;
-	HR_T(CompileShaderFromFile(L"05_BasicVertexShader.hlsl", "main", "vs_4_0", &vertexShaderBuffer));
+	HR_T(CompileShaderFromFile(L"06_BasicVertexShader.hlsl", "main", "vs_4_0", &vertexShaderBuffer));
 
 	HR_T(m_pDevice->CreateInputLayout(layout, ARRAYSIZE(layout),
 		vertexShaderBuffer->GetBufferPointer(),
@@ -237,10 +256,17 @@ bool TutorialApp::InitScene()
 	HR_T(m_pDevice->CreateBuffer(&ibDesc, &ibData, &m_pIndexBuffer));
 
 	ID3D10Blob* pixelShaderBuffer = nullptr;
-	HR_T(CompileShaderFromFile(L"05_BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
+	HR_T(CompileShaderFromFile(L"06_BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
 	HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
 		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShader));
 	SAFE_RELEASE(pixelShaderBuffer);
+
+	HR_T(CompileShaderFromFile(L"06_SolidPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
+	HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
+		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShaderSolid));
+	SAFE_RELEASE(pixelShaderBuffer);
+
+
 
 	// 6. Render() 에서 파이프라인에 바인딩할 상수 버퍼 생성	
 	ibDesc.Usage = D3D11_USAGE_DEFAULT;

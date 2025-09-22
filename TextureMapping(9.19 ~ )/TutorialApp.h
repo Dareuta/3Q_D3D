@@ -38,6 +38,7 @@ public:
 	// 렌더링 파이프라인에 적용하는  객체와 정보
 	ID3D11VertexShader* m_pVertexShader = nullptr;	// 정점 셰이더.
 	ID3D11PixelShader* m_pPixelShader = nullptr;	// 픽셀 셰이더.	
+	ID3D11PixelShader* m_pPixelShaderSolid = nullptr;	// 픽셀 셰이더 라이트 표시용.	
 	ID3D11InputLayout* m_pInputLayout = nullptr;	// 입력 레이아웃.
 	ID3D11Buffer* m_pVertexBuffer = nullptr;		// 버텍스 버퍼.
 	UINT m_VertextBufferStride = 0;					// 버텍스 하나의 크기.
