@@ -144,10 +144,13 @@ void TutorialApp::OnRender()
 
 	//cb.vOutputColor = Vector4(1, 1, 1, 1); // 흰색 불투명
 
-	{
+	{		
 		auto world = m_World;		
 		cb.mWorld = XMMatrixTranspose(world);
-		cb.mWorldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world)); // 역행렬 + 전치		
+
+		//cb.mWorldInvTranspose = XMMatrixTranspose(XMMatrixTranspose(XMMatrixInverse(nullptr, world))); // 역행렬 + 전치		
+		cb.mWorldInvTranspose = XMMatrixInverse(nullptr, world);
+
 		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
 		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 	}

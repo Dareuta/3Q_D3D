@@ -12,6 +12,7 @@ PS_INPUT main(VS_INPUT input)
     output.Pos = mul(output.Pos, Projection);
 
     output.Norm = normalize(mul(float4(input.Norm, 0), WorldInvTranspose).xyz);   
+    //output.Norm = normalize(mul(float4(input.Norm, 0), World).xyz);   
     
     return output;
 }
