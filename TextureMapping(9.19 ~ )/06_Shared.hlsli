@@ -14,10 +14,12 @@ cbuffer ConstantBuffer : register(b0)
     matrix World;
     matrix View;
     matrix Projection;
+    matrix WorldInvTranspose;
+    
     float4 vLightDir[2];
     float4 vLightColor[2];
     float4 vOutputColor;
-}
+};
 
 
 //--------------------------------------------------------------------------------------

@@ -24,10 +24,11 @@ struct ConstantBuffer // 상수버퍼
 	Matrix mWorld;
 	Matrix mView;
 	Matrix mProjection;
+	Matrix mWorldInvTranspose;
 
 	Vector4 vLightDir[2]; // 한번에 2개의 광원을 처리하게 설계해서 2개짜리임
 	Vector4 vLightColor[2];
-	Vector4 vOutputColor; 
+	Vector4 vOutputColor;
 };
 
 bool TutorialApp::OnInitialize()
@@ -47,6 +48,7 @@ bool TutorialApp::OnInitialize()
 }
 
 void TutorialApp::OnUninitialize()
+
 {
 	UninitScene();
 
@@ -77,13 +79,13 @@ void TutorialApp::OnUpdate()
 	XMMATRIX tmpA = mSpin * mTranslateA;
 	m_World = mScaleA * tmpA;
 
-	//광원
-	XMMATRIX tmpB = mSpin * mTranslateB * tmpA;
-	m_World_A = mScaleB * tmpB;
+	////광원
+	//XMMATRIX tmpB = mSpin * mTranslateB * tmpA;
+	//m_World_A = mScaleB * tmpB;
 
-	//광원 2
-	XMMATRIX tmpC = mSpin * mTranslateC * tmpB;
-	m_World_B = mScaleC * tmpC;
+	////광원 2
+	//XMMATRIX tmpC = mSpin * mTranslateC * tmpB;
+	//m_World_B = mScaleC * tmpC;
 }
 
 //================================================================================================
@@ -123,43 +125,54 @@ void TutorialApp::OnRender()
 	float aspect = m_ClientWidth / (float)m_ClientHeight;
 	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
 	//================================================================================================
+	XMMATRIX R = XMMatrixRotationRollPitchYaw(m_LightPitch, m_LightYaw, 0.0f);
+	XMVECTOR base = XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f);
+	XMVECTOR L = XMVector3Normalize(XMVector3TransformNormal(base, R));
+	Vector3 dir = { XMVectorGetX(L), XMVectorGetY(L), XMVectorGetZ(L) };
 
 	Matrix cam;
+	ConstantBuffer cb = {}; // MVP 상수버퍼임
+
 	m_Camera.GetViewMatrix(cam);
-
-	ConstantBuffer cb{}; // MVP 상수버퍼임
-
 	cb.mView = XMMatrixTranspose(cam);
 	cb.mProjection = XMMatrixTranspose(m_Projection);
 
-	cb.vLightDir[0] = Vector4(-0.3f, -1.0f, -0.2f, 0.0f); // 정규화 권장
-	cb.vLightDir[1] = Vector4(0.8f, 0.4f, 0.1f, 0.0f);
-	cb.vLightColor[0] = Vector4(1.0f, 1.0f, 1.0f, 1.0f);    // 흰색광
-	cb.vLightColor[1] = Vector4(1.0f, 0.6f, 0.3f, 1.0f);    // 주황빛
+	cb.vLightDir[0] = Vector4(dir.x, dir.y, dir.z, 0.0f);
+	cb.vLightColor[0] = Vector4(m_LightColor.x * m_LightIntensity, m_LightColor.y * m_LightIntensity, m_LightColor.z * m_LightIntensity, 1.0f);	
+	cb.vLightDir[1] = Vector4(0, 0, 0, 0);
+	cb.vLightColor[1] = Vector4(0, 0, 0, 0);
 
-	cb.vOutputColor = Vector4(0, 0, 0, 0);
+	//cb.vOutputColor = Vector4(1, 1, 1, 1); // 흰색 불투명
 
 	{
-		cb.mWorld = XMMatrixTranspose(m_World);
+		auto world = m_World;		
+		cb.mWorld = XMMatrixTranspose(world);
+		cb.mWorldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world)); // 역행렬 + 전치		
 		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
-		m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
-		m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 	}
 
-	{
-		cb.mWorld = XMMatrixTranspose(m_World_A);
-		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
-		m_pDeviceContext->PSSetShader(m_pPixelShaderSolid, nullptr, 0);
-		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
-	}
+	//// [오브젝트 B]
+	//{
+	//	auto world = m_World_A;
+	//	cb.mWorld = XMMatrixTranspose(world);
+	//	cb.mWorldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));  
 
-	{
-		cb.mWorld = XMMatrixTranspose(m_World_B);
-		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
-		m_pDeviceContext->PSSetShader(m_pPixelShaderSolid, nullptr, 0);
-		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
-	}
+	//	m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+	//	m_pDeviceContext->PSSetShader(m_pPixelShaderSolid, nullptr, 0);
+	//	m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
+	//}
+
+	//// [오브젝트 C]
+	//{
+	//	auto world = m_World_B;
+	//	cb.mWorld = XMMatrixTranspose(world);		
+	//	cb.mWorldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));  
+
+	//	m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+	//	m_pDeviceContext->PSSetShader(m_pPixelShaderSolid, nullptr, 0);
+	//	m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
+	//}
 
 	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
 
@@ -209,7 +222,6 @@ bool TutorialApp::InitScene()
 
 	D3D11_SUBRESOURCE_DATA vbData = {};
 	vbData.pSysMem = vertices;
-
 	HR_T(m_pDevice->CreateBuffer(&vbDesc, &vbData, &m_pVertexBuffer));
 
 	m_VertextBufferStride = sizeof(Vertex);
@@ -218,7 +230,7 @@ bool TutorialApp::InitScene()
 	D3D11_INPUT_ELEMENT_DESC layout[] =
 	{
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 	};
 
 	ID3D10Blob* vertexShaderBuffer = nullptr;
@@ -245,15 +257,15 @@ bool TutorialApp::InitScene()
 
 	m_nIndices = ARRAYSIZE(indices);
 
-	D3D11_BUFFER_DESC ibDesc = {};
-	ibDesc.ByteWidth = sizeof(WORD) * ARRAYSIZE(indices);
-	ibDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
-	ibDesc.Usage = D3D11_USAGE_DEFAULT;
-	ibDesc.CPUAccessFlags = 0; // cpu접근 금지
+	vbDesc = {};
+	vbDesc.ByteWidth = sizeof(WORD) * ARRAYSIZE(indices);
+	vbDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	vbDesc.Usage = D3D11_USAGE_DEFAULT;
+	vbDesc.CPUAccessFlags = 0; // cpu접근 금지
 
 	D3D11_SUBRESOURCE_DATA ibData = {};
 	ibData.pSysMem = indices;
-	HR_T(m_pDevice->CreateBuffer(&ibDesc, &ibData, &m_pIndexBuffer));
+	HR_T(m_pDevice->CreateBuffer(&vbDesc, &ibData, &m_pIndexBuffer));
 
 	ID3D10Blob* pixelShaderBuffer = nullptr;
 	HR_T(CompileShaderFromFile(L"06_BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
@@ -269,18 +281,14 @@ bool TutorialApp::InitScene()
 
 
 	// 6. Render() 에서 파이프라인에 바인딩할 상수 버퍼 생성	
-	ibDesc.Usage = D3D11_USAGE_DEFAULT;
-	ibDesc.ByteWidth = sizeof(ConstantBuffer);
-	ibDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-	ibDesc.CPUAccessFlags = 0;
-	HR_T(m_pDevice->CreateBuffer(&ibDesc, nullptr, &m_pConstantBuffer));
+	vbDesc.Usage = D3D11_USAGE_DEFAULT;
+	vbDesc.ByteWidth = sizeof(ConstantBuffer);
+	vbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	vbDesc.CPUAccessFlags = 0;
+	HR_T(m_pDevice->CreateBuffer(&vbDesc, nullptr, &m_pConstantBuffer));
 
 	// 초기값설정 (MVP)
 	m_World = XMMatrixIdentity();
-	//XMVECTOR Eye = XMVectorSet(0.0f, 4.0f, -10.0f, 0.0f);
-	//XMVECTOR At = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-	//XMVECTOR Up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-	//m_View = XMMatrixLookAtLH(Eye, At, Up); // 카메라로 대체함
 
 	float aspect = m_ClientWidth / (FLOAT)m_ClientHeight;
 	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
@@ -295,6 +303,8 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pInputLayout);
 	SAFE_RELEASE(m_pVertexShader);
 	SAFE_RELEASE(m_pPixelShader);
+	SAFE_RELEASE(m_pPixelShaderSolid);
+	SAFE_RELEASE(m_pConstantBuffer);
 }
 
 //================================================================================================
@@ -423,14 +433,21 @@ void TutorialApp::UpdateImGUI()
 	ImGui::Text("[BackGround Color]");
 	ImGui::ColorEdit3("RGB", color);
 
-	ImGui::Text("[Transform A]");
-	ImGui::DragFloat3("-10.0f ~ 10.0f##1", (float*)&cubeTransformA, 0.5f, -10.0f, 10.0f);
+	//ImGui::Text("[Transform A]");
+	//ImGui::DragFloat3("-10.0f ~ 10.0f##1", (float*)&cubeTransformA, 0.5f, -10.0f, 10.0f);
+	//ImGui::Text("[Transform B]");
+	//ImGui::DragFloat3("-10.0f ~ 10.0f##2", (float*)&cubeTransformB, 0.5f, -10.0f, 10.0f);
+	//ImGui::Text("[Transform C]");
+	//ImGui::DragFloat3("-10.0f ~ 10.0f##3", (float*)&cubeTransformC, 0.5f, -10.0f, 10.0f);
+	ImGui::Separator();
 
-	ImGui::Text("[Transform B]");
-	ImGui::DragFloat3("-10.0f ~ 10.0f##2", (float*)&cubeTransformB, 0.5f, -10.0f, 10.0f);
+	ImGui::Text("[Directional Light]");
+	ImGui::SliderAngle("[Yaw]", &m_LightYaw, -180.0f, 180.0f); // 좌우
+	ImGui::SliderAngle("[Pitch]", &m_LightPitch, -89.0f, 89.0f); // 90 되면 곤란함 - 위아래
+	ImGui::ColorEdit3("[Light Color]", (float*)&m_LightColor);
+	ImGui::SliderFloat("[Intensity]", &m_LightIntensity, 0.0f, 5.0f);
 
-	ImGui::Text("[Transform C]");
-	ImGui::DragFloat3("-10.0f ~ 10.0f##3", (float*)&cubeTransformC, 0.5f, -10.0f, 10.0f);
+	ImGui::Separator();
 
 	ImGui::Text("[Scale]");
 	ImGui::DragFloat3("-10.0f ~ 10.0f##4", (float*)&cubeScale, 0.5f, -10.0f, 10.0f);
@@ -439,13 +456,14 @@ void TutorialApp::UpdateImGUI()
 	ImGui::Text("[Camera Control]");
 	ImGui::Text("[Mouse Right Button + WASD]");
 
+	ImGui::Separator();
+
 	ImGui::Text("[Fov]");
 	ImGui::SliderFloat("10.0f ~ 120.0f", &m_FovDegree, 10.0f, 120.0f);
 	ImGui::Text("[Near]");
 	ImGui::DragFloat("default : 0.001f", &m_Near, 0.01f, 0.001f, 100.0f);
 	ImGui::Text("[Far]");
 	ImGui::DragFloat("default : 1.0f", &m_Far, 0.01f, 1.0f, 5000.0f);
-
 
 	ImGui::End();
 
