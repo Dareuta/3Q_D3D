@@ -9,7 +9,9 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "D3DCore", "D3DCore\D3DCore.
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Transform(09.17 ~ )", "Transform(09.17 ~ )\Transform(09.17 ~ ).vcxproj", "{DEE4AC5B-0D4F-4762-907D-5DF5595A7DB3}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TextureMapping(9.19 ~ )", "TextureMapping(9.19 ~ )\TextureMapping(9.19 ~ ).vcxproj", "{C51EE43C-1AAA-4E65-AA0B-144B54B3D407}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Directional Lighting(9.19 ~ )", "TextureMapping(9.19 ~ )\TextureMapping(9.19 ~ ).vcxproj", "{C51EE43C-1AAA-4E65-AA0B-144B54B3D407}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SkyBox(9.25 ~ )", "SkyBox(9.25 ~ )\SkyBox(9.25 ~ ).vcxproj", "{FD00D629-C2BE-4BC4-8DF5-98E7BD00BCC0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -51,6 +53,14 @@ Global
 		{C51EE43C-1AAA-4E65-AA0B-144B54B3D407}.Release|x64.Build.0 = Release|x64
 		{C51EE43C-1AAA-4E65-AA0B-144B54B3D407}.Release|x86.ActiveCfg = Release|Win32
 		{C51EE43C-1AAA-4E65-AA0B-144B54B3D407}.Release|x86.Build.0 = Release|Win32
+		{FD00D629-C2BE-4BC4-8DF5-98E7BD00BCC0}.Debug|x64.ActiveCfg = Debug|x64
+		{FD00D629-C2BE-4BC4-8DF5-98E7BD00BCC0}.Debug|x64.Build.0 = Debug|x64
+		{FD00D629-C2BE-4BC4-8DF5-98E7BD00BCC0}.Debug|x86.ActiveCfg = Debug|Win32
+		{FD00D629-C2BE-4BC4-8DF5-98E7BD00BCC0}.Debug|x86.Build.0 = Debug|Win32
+		{FD00D629-C2BE-4BC4-8DF5-98E7BD00BCC0}.Release|x64.ActiveCfg = Release|x64
+		{FD00D629-C2BE-4BC4-8DF5-98E7BD00BCC0}.Release|x64.Build.0 = Release|x64
+		{FD00D629-C2BE-4BC4-8DF5-98E7BD00BCC0}.Release|x86.ActiveCfg = Release|Win32
+		{FD00D629-C2BE-4BC4-8DF5-98E7BD00BCC0}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
