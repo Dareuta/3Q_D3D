@@ -24,6 +24,7 @@
     <ProjectGuid>{fd00d629-c2be-4bc4-8df5-98e7bd00bcc0}</ProjectGuid>
     <RootNamespace>SkyBox925</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>[4] SkyBox(9.25 ~ )</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">

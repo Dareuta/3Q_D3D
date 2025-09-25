@@ -24,6 +24,7 @@
     <ProjectGuid>{2a1a8192-5f2f-4b4a-b541-640d21763f1d}</ProjectGuid>
     <RootNamespace>My3QD3DTest910</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>[1] D3D_Test(9.10. ~ )</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
