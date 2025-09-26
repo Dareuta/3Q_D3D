@@ -13,7 +13,9 @@ float4 main(PS_INPUT input) : SV_Target
     {
         finalColor += saturate(dot((float3) vLightDir[i], input.Norm) * vLightColor[i]);
     }
-    finalColor.a = 1;
 
-    return finalColor * albedo;
+    finalColor.rgb = albedo.rgb * finalColor.rgb ;
+    finalColor.a = albedo.a;
+
+    return finalColor;
 }

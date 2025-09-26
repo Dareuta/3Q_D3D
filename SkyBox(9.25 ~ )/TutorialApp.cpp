@@ -79,14 +79,6 @@ void TutorialApp::OnUpdate()
 	//오브젝트
 	XMMATRIX tmpA = mSpin * mTranslateA;
 	m_World = mScaleA * tmpA;
-
-	////광원
-	//XMMATRIX tmpB = mSpin * mTranslateB * tmpA;
-	//m_World_A = mScaleB * tmpB;
-
-	////광원 2
-	//XMMATRIX tmpC = mSpin * mTranslateC * tmpB;
-	//m_World_B = mScaleC * tmpC;
 }
 
 //================================================================================================
@@ -129,7 +121,7 @@ void TutorialApp::OnRender()
 	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
 	//================================================================================================
 	XMMATRIX R = XMMatrixRotationRollPitchYaw(m_LightPitch, m_LightYaw, 0.0f);
-	XMVECTOR base = XMVectorSet(0.0f, -1.0f, 0.0f, 0.0f);
+	XMVECTOR base = XMVector3Normalize(XMVectorSet(1.0f, 1.0f, -1.0f, 0.0f));
 	XMVECTOR L = XMVector3Normalize(XMVector3TransformNormal(base, R));
 	Vector3 dir = { XMVectorGetX(L), XMVectorGetY(L), XMVectorGetZ(L) };
 
@@ -145,8 +137,6 @@ void TutorialApp::OnRender()
 	cb.vLightDir[1] = Vector4(0, 0, 0, 0);
 	cb.vLightColor[1] = Vector4(0, 0, 0, 0);
 
-	//cb.vOutputColor = Vector4(1, 1, 1, 1); // 흰색 불투명
-
 	{
 		auto world = m_World;
 		cb.mWorld = XMMatrixTranspose(world);
@@ -157,28 +147,6 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
 		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 	}
-
-	//// [오브젝트 B]
-	//{
-	//	auto world = m_World_A;
-	//	cb.mWorld = XMMatrixTranspose(world);
-	//	cb.mWorldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));  
-
-	//	m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
-	//	m_pDeviceContext->PSSetShader(m_pPixelShaderSolid, nullptr, 0);
-	//	m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
-	//}
-
-	//// [오브젝트 C]
-	//{
-	//	auto world = m_World_B;
-	//	cb.mWorld = XMMatrixTranspose(world);		
-	//	cb.mWorldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));  
-
-	//	m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
-	//	m_pDeviceContext->PSSetShader(m_pPixelShaderSolid, nullptr, 0);
-	//	m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
-	//}
 
 	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
 
@@ -322,7 +290,7 @@ bool TutorialApp::InitScene()
 	// 텍스쳐
 	HR_T(CreateDDSTextureFromFile(
 		m_pDevice,
-		L"seafloor.dds",
+		L"koyuki.dds",
 		nullptr,
 		&m_pTextureRV
 	));
@@ -487,12 +455,11 @@ void TutorialApp::UpdateImGUI()
 	ImGui::Text("[BackGround Color]");
 	ImGui::ColorEdit3("RGB", color);
 
-	//ImGui::Text("[Transform A]");
-	//ImGui::DragFloat3("-10.0f ~ 10.0f##1", (float*)&cubeTransformA, 0.5f, -10.0f, 10.0f);
-	//ImGui::Text("[Transform B]");
-	//ImGui::DragFloat3("-10.0f ~ 10.0f##2", (float*)&cubeTransformB, 0.5f, -10.0f, 10.0f);
-	//ImGui::Text("[Transform C]");
-	//ImGui::DragFloat3("-10.0f ~ 10.0f##3", (float*)&cubeTransformC, 0.5f, -10.0f, 10.0f);
+	ImGui::Separator();
+
+	ImGui::Text("[Transform A]");
+	ImGui::DragFloat3("-10.0f ~ 10.0f##1", (float*)&cubeTransformA, 0.5f, -10.0f, 10.0f);
+
 	ImGui::Separator();
 
 	ImGui::Text("[Directional Light]");
