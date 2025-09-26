@@ -5,6 +5,7 @@
 #include "TutorialApp.h"
 #include "../D3DCore/Helper.h"
 #include <d3dcompiler.h>
+#include <Directxtk/DDSTextureLoader.h>
 
 #pragma comment (lib, "d3d11.lib")
 #pragma comment(lib,"d3dcompiler.lib")
@@ -14,9 +15,9 @@ struct Vertex
 {
 	Vector3 position;
 	Vector3 normal;
-	Vertex() = default;
-	Vertex(Vector3 p, Vector3 n) : position(p), normal(n) {}
+	Vector2 tex;
 };
+
 
 
 struct ConstantBuffer // 상수버퍼
@@ -109,6 +110,8 @@ void TutorialApp::OnRender()
 	//PS
 	m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
+	m_pDeviceContext->PSSetShaderResources(0, 1, &m_pTextureRV);
+	m_pDeviceContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
 
 	//================================================================================================
 
@@ -138,14 +141,14 @@ void TutorialApp::OnRender()
 	cb.mProjection = XMMatrixTranspose(m_Projection);
 
 	cb.vLightDir[0] = Vector4(dir.x, dir.y, dir.z, 0.0f);
-	cb.vLightColor[0] = Vector4(m_LightColor.x * m_LightIntensity, m_LightColor.y * m_LightIntensity, m_LightColor.z * m_LightIntensity, 1.0f);	
+	cb.vLightColor[0] = Vector4(m_LightColor.x * m_LightIntensity, m_LightColor.y * m_LightIntensity, m_LightColor.z * m_LightIntensity, 1.0f);
 	cb.vLightDir[1] = Vector4(0, 0, 0, 0);
 	cb.vLightColor[1] = Vector4(0, 0, 0, 0);
 
 	//cb.vOutputColor = Vector4(1, 1, 1, 1); // 흰색 불투명
 
-	{		
-		auto world = m_World;		
+	{
+		auto world = m_World;
 		cb.mWorld = XMMatrixTranspose(world);
 
 		//cb.mWorldInvTranspose = XMMatrixTranspose(XMMatrixTranspose(XMMatrixInverse(nullptr, world))); // 역행렬 + 전치		
@@ -192,25 +195,43 @@ bool TutorialApp::InitScene()
 {
 	HRESULT hr = 0;
 
-	const float hTop = 1.4f;   // 위 꼭짓점 높이
-	const float hBot = 1.4f;   // 아래 꼭짓점 깊이
-	const float r = 1.0f;   // 가운데 링 반경
+	Vertex vertices[] =
+	{
+		// Top (+Y)
+		{ Vector3(-1.0f,  1.0f, -1.0f), Vector3(0, 1, 0), Vector2(1.0f, 0.0f) },
+		{ Vector3(1.0f,  1.0f, -1.0f), Vector3(0, 1, 0), Vector2(0.0f, 0.0f) },
+		{ Vector3(1.0f,  1.0f,  1.0f), Vector3(0, 1, 0), Vector2(0.0f, 1.0f) },
+		{ Vector3(-1.0f,  1.0f,  1.0f), Vector3(0, 1, 0), Vector2(1.0f, 1.0f) },
 
-	const float PHI = (1.0f + sqrtf(5.0f)) * 0.5f; // 황금비
+		// Bottom (-Y)
+		{ Vector3(-1.0f, -1.0f, -1.0f), Vector3(0,-1, 0), Vector2(0.0f, 0.0f) },
+		{ Vector3(1.0f, -1.0f, -1.0f), Vector3(0,-1, 0), Vector2(1.0f, 0.0f) },
+		{ Vector3(1.0f, -1.0f,  1.0f), Vector3(0,-1, 0), Vector2(1.0f, 1.0f) },
+		{ Vector3(-1.0f, -1.0f,  1.0f), Vector3(0,-1, 0), Vector2(0.0f, 1.0f) },
 
-	Vertex vertices[] = {
-		{ { -1,  PHI,  0 },  Vector3(-1,  PHI,  0) },
-		{ {  1,  PHI,  0 },  Vector3(1,  PHI,  0) },
-		{ { -1, -PHI,  0 },  Vector3(-1, -PHI,  0) },
-		{ {  1, -PHI,  0 },  Vector3(1, -PHI,  0) },
-		{ {  0, -1,  PHI },  Vector3(0, -1,  PHI) },
-		{ {  0,  1,  PHI },  Vector3(0,  1,  PHI) },
-		{ {  0, -1, -PHI },  Vector3(0, -1, -PHI) },
-		{ {  0,  1, -PHI },  Vector3(0,  1, -PHI) },
-		{ {  PHI,  0, -1 },  Vector3(PHI,  0, -1) },
-		{ {  PHI,  0,  1 },  Vector3(PHI,  0,  1) },
-		{ { -PHI,  0, -1 },  Vector3(-PHI,  0, -1) },
-		{ { -PHI,  0,  1 },  Vector3(-PHI,  0,  1) },
+		// Left (-X)
+		{ Vector3(-1.0f, -1.0f,  1.0f), Vector3(-1,0,0), Vector2(0.0f, 1.0f) },
+		{ Vector3(-1.0f, -1.0f, -1.0f), Vector3(-1,0,0), Vector2(1.0f, 1.0f) },
+		{ Vector3(-1.0f,  1.0f, -1.0f), Vector3(-1,0,0), Vector2(1.0f, 0.0f) },
+		{ Vector3(-1.0f,  1.0f,  1.0f), Vector3(-1,0,0), Vector2(0.0f, 0.0f) },
+
+		// Right (+X)
+		{ Vector3(1.0f, -1.0f,  1.0f), Vector3(1,0,0), Vector2(1.0f, 1.0f) },
+		{ Vector3(1.0f, -1.0f, -1.0f), Vector3(1,0,0), Vector2(0.0f, 1.0f) },
+		{ Vector3(1.0f,  1.0f, -1.0f), Vector3(1,0,0), Vector2(0.0f, 0.0f) },
+		{ Vector3(1.0f,  1.0f,  1.0f), Vector3(1,0,0), Vector2(1.0f, 0.0f) },
+
+		// Back (-Z)
+		{ Vector3(-1.0f, -1.0f, -1.0f), Vector3(0,0,-1), Vector2(0.0f, 1.0f) },
+		{ Vector3(1.0f, -1.0f, -1.0f), Vector3(0,0,-1), Vector2(1.0f, 1.0f) },
+		{ Vector3(1.0f,  1.0f, -1.0f), Vector3(0,0,-1), Vector2(1.0f, 0.0f) },
+		{ Vector3(-1.0f,  1.0f, -1.0f), Vector3(0,0,-1), Vector2(0.0f, 0.0f) },
+
+		// Front (+Z)
+		{ Vector3(-1.0f, -1.0f,  1.0f), Vector3(0,0, 1), Vector2(1.0f, 1.0f) },
+		{ Vector3(1.0f, -1.0f,  1.0f), Vector3(0,0, 1), Vector2(0.0f, 1.0f) },
+		{ Vector3(1.0f,  1.0f,  1.0f), Vector3(0,0, 1), Vector2(0.0f, 0.0f) },
+		{ Vector3(-1.0f,  1.0f,  1.0f), Vector3(0,0, 1), Vector2(1.0f, 0.0f) },
 	};
 
 	for (auto& v : vertices) {
@@ -234,10 +255,11 @@ bool TutorialApp::InitScene()
 	{
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 	};
 
 	ID3D10Blob* vertexShaderBuffer = nullptr;
-	HR_T(CompileShaderFromFile(L"06_BasicVertexShader.hlsl", "main", "vs_4_0", &vertexShaderBuffer));
+	HR_T(CompileShaderFromFile(L"07_0_BasicVertexShader.hlsl", "main", "vs_4_0", &vertexShaderBuffer));
 
 	HR_T(m_pDevice->CreateInputLayout(layout, ARRAYSIZE(layout),
 		vertexShaderBuffer->GetBufferPointer(),
@@ -251,11 +273,15 @@ bool TutorialApp::InitScene()
 
 	SAFE_RELEASE(vertexShaderBuffer);
 
-	WORD indices[] = {
-		0,11,5,   0,5,1,    0,1,7,    0,7,10,   0,10,11,
-		1,5,9,    5,11,4,   11,10,2,  10,7,6,   7,1,8,
-		3,9,4,    3,4,2,    3,2,6,    3,6,8,    3,8,9,
-		4,9,5,    2,4,11,   6,2,10,   8,6,7,    9,8,1
+
+	WORD indices[] =
+	{
+		3,1,0, 2,1,3,
+		6,4,5, 7,4,6,
+		11,9,8, 10,9,11,
+		14,12,13, 15,12,14,
+		19,17,16, 18,17,19,
+		22,20,21, 23,20,22
 	};
 
 	m_nIndices = ARRAYSIZE(indices);
@@ -271,7 +297,7 @@ bool TutorialApp::InitScene()
 	HR_T(m_pDevice->CreateBuffer(&vbDesc, &ibData, &m_pIndexBuffer));
 
 	ID3D10Blob* pixelShaderBuffer = nullptr;
-	HR_T(CompileShaderFromFile(L"06_BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
+	HR_T(CompileShaderFromFile(L"07_0_BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
 	HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
 		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShader));
 	SAFE_RELEASE(pixelShaderBuffer);
@@ -281,7 +307,7 @@ bool TutorialApp::InitScene()
 		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShaderSolid));
 	SAFE_RELEASE(pixelShaderBuffer);
 
-
+	//================================================================================================
 
 	// 6. Render() 에서 파이프라인에 바인딩할 상수 버퍼 생성	
 	vbDesc.Usage = D3D11_USAGE_DEFAULT;
@@ -289,6 +315,29 @@ bool TutorialApp::InitScene()
 	vbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	vbDesc.CPUAccessFlags = 0;
 	HR_T(m_pDevice->CreateBuffer(&vbDesc, nullptr, &m_pConstantBuffer));
+
+
+	//================================================================================================
+	
+	// 텍스쳐
+	HR_T(CreateDDSTextureFromFile(
+		m_pDevice,
+		L"seafloor.dds",
+		nullptr,
+		&m_pTextureRV
+	));
+
+	D3D11_SAMPLER_DESC samp = {};
+	samp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	samp.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+	samp.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+	samp.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+	samp.ComparisonFunc = D3D11_COMPARISON_NEVER;
+	samp.MinLOD = 0;
+	samp.MaxLOD = D3D11_FLOAT32_MAX;
+	HR_T(m_pDevice->CreateSamplerState(&samp, &m_pSamplerLinear));
+	
+	//================================================================================================
 
 	// 초기값설정 (MVP)
 	m_World = XMMatrixIdentity();
@@ -308,6 +357,8 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pPixelShader);
 	SAFE_RELEASE(m_pPixelShaderSolid);
 	SAFE_RELEASE(m_pConstantBuffer);
+	SAFE_RELEASE(m_pTextureRV);
+	SAFE_RELEASE(m_pSamplerLinear);
 }
 
 //================================================================================================

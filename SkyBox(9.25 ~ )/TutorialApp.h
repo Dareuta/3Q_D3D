@@ -59,6 +59,11 @@ public:
 	ID3D11DepthStencilView* m_pDepthStencilView = nullptr;
 	ID3D11DepthStencilState* m_pDepthStencilState = nullptr;
 
+	//================================================================================================
+	// 추가한 뭐시기2
+	ID3D11ShaderResourceView* m_pTextureRV = nullptr;	// 텍스처 리소스 뷰.
+	ID3D11SamplerState* m_pSamplerLinear = nullptr;
+
 
 	bool OnInitialize() override;
 	void OnUninitialize() override;
