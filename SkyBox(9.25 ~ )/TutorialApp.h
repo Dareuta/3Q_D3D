@@ -38,7 +38,9 @@ public:
 	// 렌더링 파이프라인에 적용하는  객체와 정보
 	ID3D11VertexShader* m_pVertexShader = nullptr;	// 정점 셰이더.
 	ID3D11PixelShader* m_pPixelShader = nullptr;	// 픽셀 셰이더.	
-	ID3D11PixelShader* m_pPixelShaderSolid = nullptr;	// 픽셀 셰이더 라이트 표시용.	
+
+	//ID3D11PixelShader* m_pPixelShaderSolid = nullptr;	// 픽셀 셰이더 라이트 표시용.	
+
 	ID3D11InputLayout* m_pInputLayout = nullptr;	// 입력 레이아웃.
 	ID3D11Buffer* m_pVertexBuffer = nullptr;		// 버텍스 버퍼.
 	UINT m_VertextBufferStride = 0;					// 버텍스 하나의 크기.
@@ -61,8 +63,24 @@ public:
 
 	//================================================================================================
 	// 추가한 뭐시기2
-	ID3D11ShaderResourceView* m_pTextureRV = nullptr;	// 텍스처 리소스 뷰.
+	ID3D11ShaderResourceView* m_pTextureRV = nullptr;	// 텍스처 리소스 뷰.	
 	ID3D11SamplerState* m_pSamplerLinear = nullptr;
+
+	//================================================================================================
+	// 스카이박스에 사용하는거 따로 한세트 추가함
+
+	ID3D11ShaderResourceView* m_pSkySRV = nullptr;  // 스카이박스
+	ID3D11SamplerState* m_pSkySampler = nullptr;  // 스카이용
+
+	ID3D11DepthStencilState* m_pSkyDSS = nullptr;  
+	ID3D11RasterizerState* m_pSkyRS = nullptr; // 이거, 스카이 박스는 감기는 방향 반대로 해줘야해서 필요함 - 원래는 기본값 사용했던거임
+
+	ID3D11VertexShader* m_pSkyVS = nullptr;
+	ID3D11PixelShader* m_pSkyPS = nullptr;
+	ID3D11InputLayout* m_pSkyIL = nullptr;
+
+	//================================================================================================
+
 
 
 	bool OnInitialize() override;

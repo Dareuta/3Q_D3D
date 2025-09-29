@@ -84,13 +84,67 @@ void TutorialApp::OnUpdate()
 //================================================================================================
 
 void TutorialApp::OnRender()
-{
-	//OM
+{	//OM
 	m_pDeviceContext->OMSetRenderTargets(1, &m_pRenderTargetView, m_pDepthStencilView);
 	//Clear
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
 	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
+	//================================================================================================
+	
+	// ===== Skybox pass =====
+	ID3D11RasterizerState* prevRS = nullptr;
+	m_pDeviceContext->RSGetState(&prevRS);
+
+	// 상태: DepthWrite=ZERO + LEQUAL, Cull=FRONT
+	m_pDeviceContext->OMSetDepthStencilState(m_pSkyDSS, 0);
+	m_pDeviceContext->RSSetState(m_pSkyRS);
+
+	// IA: 스카이용 IL (VB/IB는 기존 큐브 재사용)
+	m_pDeviceContext->IASetInputLayout(m_pSkyIL);
+	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pVertexBuffer, &m_VertextBufferStride, &m_VertextBufferOffset);
+	m_pDeviceContext->IASetIndexBuffer(m_pIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
+
+	// VS/PS
+	m_pDeviceContext->VSSetShader(m_pSkyVS, nullptr, 0);
+	m_pDeviceContext->PSSetShader(m_pSkyPS, nullptr, 0);
+
+	// CB: View의 이동 성분 제거
+	Matrix camNoTrans;
+	m_Camera.GetViewMatrix(camNoTrans);
+	camNoTrans._41 = camNoTrans._42 = camNoTrans._43 = 0.0f;
+
+	ConstantBuffer skyCB{};
+	skyCB.mWorld = XMMatrixTranspose(XMMatrixIdentity());
+	skyCB.mView = XMMatrixTranspose(camNoTrans);
+	skyCB.mProjection = XMMatrixTranspose(m_Projection);
+	skyCB.mWorldInvTranspose = XMMatrixIdentity(); // 안 씀
+
+	m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &skyCB, 0, 0);
+	m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+
+	// 텍스처/샘플러
+	m_pDeviceContext->PSSetShaderResources(0, 1, &m_pSkySRV);
+	m_pDeviceContext->PSSetSamplers(0, 1, &m_pSkySampler);
+
+	// Draw
+	m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
+
+	// SRV 언바인드(다음 패스에서 t0 충돌 방지)
+	ID3D11ShaderResourceView* nullSRV = nullptr;
+	m_pDeviceContext->PSSetShaderResources(0, 1, &nullSRV);
+
+	// 상태 복구
+	m_pDeviceContext->OMSetDepthStencilState(m_pDepthStencilState, 0);
+	m_pDeviceContext->RSSetState(prevRS);
+	SAFE_RELEASE(prevRS);
+
+	// ===== End Skybox pass =====
+
+
+
+	//================================================================================================
 	//IA
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pVertexBuffer, &m_VertextBufferStride, &m_VertextBufferOffset);
@@ -162,6 +216,54 @@ void TutorialApp::OnRender()
 bool TutorialApp::InitScene()
 {
 	HRESULT hr = 0;
+
+	//스카이 박스 뚝딱뚝딱
+	//================================================================================================
+
+	HR_T(CreateDDSTextureFromFile(m_pDevice, L"Hanako.dds", nullptr, &m_pSkySRV));
+
+	D3D11_SAMPLER_DESC skySamp{}; // 샘플러
+	skySamp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	skySamp.AddressU = skySamp.AddressV = skySamp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+	HR_T(m_pDevice->CreateSamplerState(&skySamp, &m_pSkySampler));
+
+	D3D11_DEPTH_STENCIL_DESC sd{};
+	sd.DepthEnable = TRUE;
+	sd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+	sd.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+	HR_T(m_pDevice->CreateDepthStencilState(&sd, &m_pSkyDSS));
+
+	// 여기가 그거임, 뒤집기
+	D3D11_RASTERIZER_DESC rs{};
+	rs.FillMode = D3D11_FILL_SOLID;
+	rs.CullMode = D3D11_CULL_FRONT;
+	rs.FrontCounterClockwise = FALSE;
+	//FALSE → 시계방향(CW) 이 Front
+	//TRUE → 반시계(CCW) 가 Front
+
+	HR_T(m_pDevice->CreateRasterizerState(&rs, &m_pSkyRS));
+
+	//================================================================================================
+
+	//vs
+	ID3D10Blob* vsb = nullptr;
+	HR_T(CompileShaderFromFile(L"Sky_VS.hlsl", "main", "vs_4_0", &vsb));
+	HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pSkyVS));
+
+	D3D11_INPUT_ELEMENT_DESC skyLayout[] = {
+		{"POSITION", 0 , DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+	};
+
+	HR_T(m_pDevice->CreateInputLayout(skyLayout, ARRAYSIZE(skyLayout), vsb->GetBufferPointer(), vsb->GetBufferSize(), &m_pSkyIL));
+	SAFE_RELEASE(vsb);
+
+	//ps
+	ID3D10Blob* psb = nullptr;
+	HR_T(CompileShaderFromFile(L"Sky_PS.hlsl", "main", "ps_4_0", &psb));
+	HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pSkyPS));
+	SAFE_RELEASE(psb);
+
+	//================================================================================================	
 
 	Vertex vertices[] =
 	{
@@ -270,10 +372,10 @@ bool TutorialApp::InitScene()
 		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShader));
 	SAFE_RELEASE(pixelShaderBuffer);
 
-	HR_T(CompileShaderFromFile(L"06_SolidPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
-	HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
-		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShaderSolid));
-	SAFE_RELEASE(pixelShaderBuffer);
+	//HR_T(CompileShaderFromFile(L"06_SolidPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
+	//HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
+	//	pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShaderSolid));
+	//SAFE_RELEASE(pixelShaderBuffer);
 
 	//================================================================================================
 
@@ -286,7 +388,7 @@ bool TutorialApp::InitScene()
 
 
 	//================================================================================================
-	
+
 	// 텍스쳐
 	HR_T(CreateDDSTextureFromFile(
 		m_pDevice,
@@ -304,7 +406,7 @@ bool TutorialApp::InitScene()
 	samp.MinLOD = 0;
 	samp.MaxLOD = D3D11_FLOAT32_MAX;
 	HR_T(m_pDevice->CreateSamplerState(&samp, &m_pSamplerLinear));
-	
+
 	//================================================================================================
 
 	// 초기값설정 (MVP)
@@ -323,7 +425,7 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pInputLayout);
 	SAFE_RELEASE(m_pVertexShader);
 	SAFE_RELEASE(m_pPixelShader);
-	SAFE_RELEASE(m_pPixelShaderSolid);
+	//SAFE_RELEASE(m_pPixelShaderSolid);
 	SAFE_RELEASE(m_pConstantBuffer);
 	SAFE_RELEASE(m_pTextureRV);
 	SAFE_RELEASE(m_pSamplerLinear);
@@ -421,6 +523,17 @@ void TutorialApp::UninitD3D()
 	SAFE_RELEASE(m_pDeviceContext);
 	SAFE_RELEASE(m_pSwapChain);
 	SAFE_RELEASE(m_pDevice);
+
+	//푸짐한 스카이박스 한상
+	SAFE_RELEASE(m_pSkySRV);
+	SAFE_RELEASE(m_pSkySampler);
+
+	SAFE_RELEASE(m_pSkyDSS);
+	SAFE_RELEASE(m_pSkyRS);
+
+	SAFE_RELEASE(m_pSkyVS);
+	SAFE_RELEASE(m_pSkyPS);
+	SAFE_RELEASE(m_pSkyIL);
 }
 
 //================================================================================================
