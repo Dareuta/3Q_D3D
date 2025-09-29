@@ -215,7 +215,7 @@ bool TutorialApp::InitScene()
 	//스카이 박스 뚝딱뚝딱
 	//================================================================================================
 
-	HR_T(CreateDDSTextureFromFile(m_pDevice, L"Hanako.dds", nullptr, &m_pSkySRV));
+	HR_T(CreateDDSTextureFromFile(m_pDevice, L"../Resource/Hanako.dds", nullptr, &m_pSkySRV));
 
 	D3D11_SAMPLER_DESC skySamp{}; // 샘플러
 	skySamp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -242,7 +242,7 @@ bool TutorialApp::InitScene()
 
 	//vs
 	ID3D10Blob* vsb = nullptr;
-	HR_T(CompileShaderFromFile(L"Sky_VS.hlsl", "main", "vs_4_0", &vsb));
+	HR_T(CompileShaderFromFile(L"../Resource/Sky_VS.hlsl", "main", "vs_4_0", &vsb));
 	HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pSkyVS));
 
 	D3D11_INPUT_ELEMENT_DESC skyLayout[] = {
@@ -254,7 +254,7 @@ bool TutorialApp::InitScene()
 
 	//ps
 	ID3D10Blob* psb = nullptr;
-	HR_T(CompileShaderFromFile(L"Sky_PS.hlsl", "main", "ps_4_0", &psb));
+	HR_T(CompileShaderFromFile(L"../Resource/Sky_PS.hlsl", "main", "ps_4_0", &psb));
 	HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pSkyPS));
 	SAFE_RELEASE(psb);
 
@@ -324,7 +324,7 @@ bool TutorialApp::InitScene()
 	};
 
 	ID3D10Blob* vertexShaderBuffer = nullptr;
-	HR_T(CompileShaderFromFile(L"07_0_BasicVertexShader.hlsl", "main", "vs_4_0", &vertexShaderBuffer));
+	HR_T(CompileShaderFromFile(L"../Resource/BasicVertexShader.hlsl", "main", "vs_4_0", &vertexShaderBuffer));
 
 	HR_T(m_pDevice->CreateInputLayout(layout, ARRAYSIZE(layout),
 		vertexShaderBuffer->GetBufferPointer(),
@@ -362,12 +362,12 @@ bool TutorialApp::InitScene()
 	HR_T(m_pDevice->CreateBuffer(&vbDesc, &ibData, &m_pIndexBuffer));
 
 	ID3D10Blob* pixelShaderBuffer = nullptr;
-	HR_T(CompileShaderFromFile(L"07_0_BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
+	HR_T(CompileShaderFromFile(L"../Resource/BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
 	HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
 		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShader));
 	SAFE_RELEASE(pixelShaderBuffer);
 
-	//HR_T(CompileShaderFromFile(L"06_SolidPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
+	//HR_T(CompileShaderFromFile(L"../Resource/SolidPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
 	//HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
 	//	pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShaderSolid));
 	//SAFE_RELEASE(pixelShaderBuffer);
@@ -387,7 +387,7 @@ bool TutorialApp::InitScene()
 	// 텍스쳐
 	HR_T(CreateDDSTextureFromFile(
 		m_pDevice,
-		L"koyuki.dds",
+		L"../Resource/koyuki.dds",
 		nullptr,
 		&m_pTextureRV
 	));
