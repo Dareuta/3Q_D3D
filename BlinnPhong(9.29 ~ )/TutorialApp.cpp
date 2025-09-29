@@ -15,7 +15,7 @@ struct Vertex
 {
 	Vector3 position;
 	Vector3 normal;
-	Vector2 tex;
+	Vector2 tex; 
 };
 
 
@@ -368,10 +368,10 @@ bool TutorialApp::InitScene()
 		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShader));
 	SAFE_RELEASE(pixelShaderBuffer);
 
-	HR_T(CompileShaderFromFile(L"../Resource/SolidPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
-	HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
-		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShaderSolid));
-	SAFE_RELEASE(pixelShaderBuffer);
+	//HR_T(CompileShaderFromFile(L"../Resource/SolidPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
+	//HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
+	//	pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShaderSolid));
+	//SAFE_RELEASE(pixelShaderBuffer);
 
 	//================================================================================================
 
@@ -421,7 +421,7 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pInputLayout);
 	SAFE_RELEASE(m_pVertexShader);
 	SAFE_RELEASE(m_pPixelShader);
-	SAFE_RELEASE(m_pPixelShaderSolid);
+	//SAFE_RELEASE(m_pPixelShaderSolid);
 	SAFE_RELEASE(m_pConstantBuffer);
 	SAFE_RELEASE(m_pTextureRV);
 	SAFE_RELEASE(m_pSamplerLinear);

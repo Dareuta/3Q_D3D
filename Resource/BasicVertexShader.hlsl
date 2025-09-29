@@ -4,16 +4,21 @@
 // Vertex Shader
 //--------------------------------------------------------------------------------------
 
+
+
 PS_INPUT main(VS_INPUT input)
 {
     PS_INPUT output = (PS_INPUT) 0;
 
-    output.Pos = mul(input.Pos, World);
-    output.Pos = mul(output.Pos, View);
-    output.Pos = mul(output.Pos, Projection);
+    float4 wpos = mul(input.Pos, World);
+    output.WorldPos = wpos.xyz;
+    
+    float4 vpos = mul(wpos, View);
+    output.Pos = mul(vpos, Projection);
+                
     output.Tex = input.Tex;
 
-    output.Norm = normalize(mul(float4(input.Norm, 0), WorldInvTranspose).xyz);   
+    output.Norm = normalize(mul(float4(input.Norm, 0), WorldInvTranspose).xyz);
     //output.Norm = normalize(mul(float4(input.Norm, 0), World).xyz);   
     
     return output;
