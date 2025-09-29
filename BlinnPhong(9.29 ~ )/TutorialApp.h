@@ -39,7 +39,7 @@ public:
 	ID3D11VertexShader* m_pVertexShader = nullptr;	// 정점 셰이더.
 	ID3D11PixelShader* m_pPixelShader = nullptr;	// 픽셀 셰이더.	
 
-	//ID3D11PixelShader* m_pPixelShaderSolid = nullptr;	// 픽셀 셰이더 라이트 표시용.	
+	ID3D11PixelShader* m_pPixelShaderSolid = nullptr;	// 픽셀 셰이더 라이트 표시용.	
 
 	ID3D11InputLayout* m_pInputLayout = nullptr;	// 입력 레이아웃.
 	ID3D11Buffer* m_pVertexBuffer = nullptr;		// 버텍스 버퍼.
@@ -102,7 +102,7 @@ public:
 
 private:
 	float color[3] = { 0.1f, 0.11f, 0.13f };
-	float spinSpeed = 1.0f;
+	float spinSpeed = 0.0f;
 
 	float m_FovDegree = 60.0f;    // degrees
 	float m_Near = 0.01f;
@@ -116,7 +116,7 @@ private:
 
 
 	Vector3 cubeScale = { 0.7f, 0.7f, 0.7f };
-	Vector3 cubeTransformA = { 0.0f, 0.0f, 0.0f };
+	Vector3 cubeTransformA = { 0.0f, 0.0f, -20.0f };
 	Vector3 cubeTransformB = { 5.0f, 0.0f, 0.0f };
 	Vector3 cubeTransformC = { 3.0f, 0.0f, 0.0f };
 };
