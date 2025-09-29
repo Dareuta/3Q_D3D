@@ -91,8 +91,7 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
 	//================================================================================================
-	
-	// ===== Skybox pass =====
+
 	ID3D11RasterizerState* prevRS = nullptr;
 	m_pDeviceContext->RSGetState(&prevRS);
 
@@ -139,10 +138,6 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->OMSetDepthStencilState(m_pDepthStencilState, 0);
 	m_pDeviceContext->RSSetState(prevRS);
 	SAFE_RELEASE(prevRS);
-
-	// ===== End Skybox pass =====
-
-
 
 	//================================================================================================
 	//IA
