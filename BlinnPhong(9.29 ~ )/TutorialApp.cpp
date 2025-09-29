@@ -32,6 +32,17 @@ struct ConstantBuffer // 상수버퍼
 	Vector4 vOutputColor;
 };
 
+struct BlinnPhongCB
+{
+	Vector4 EyePosW;   // (ex,ey,ez,1)
+	Vector4 kA;        // (ka.r,ka.g,ka.b,0)
+	Vector4 kSAlpha;   // (ks, alpha, 0, 0)
+	Vector4 I_ambient; // (Ia.r,Ia.g,Ia.b,0)
+};
+
+
+
+
 bool TutorialApp::OnInitialize()
 {
 	if (!InitD3D())
@@ -139,6 +150,23 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->OMSetDepthStencilState(m_pDepthStencilState, 0);
 	m_pDeviceContext->RSSetState(prevRS);
 	SAFE_RELEASE(prevRS);
+
+	// 1) 카메라 월드좌표 구하기 (View의 역행렬)
+	Matrix view;
+	m_Camera.GetViewMatrix(view);
+	Matrix invView = XMMatrixInverse(nullptr, view);
+	Vector3 eye(invView._41, invView._42, invView._43);
+
+	// 2) Blinn-Phong 파라미터 채우기
+	BlinnPhongCB bp{};
+	bp.EyePosW = Vector4(eye.x, eye.y, eye.z, 1.0f);
+	bp.kA = Vector4(m_Ka.x, m_Ka.y, m_Ka.z, 0.0f);
+	bp.kSAlpha = Vector4(m_Ks, m_Shininess, 0.0f, 0.0f);
+	bp.I_ambient = Vector4(m_Ia.x, m_Ia.y, m_Ia.z, 0.0f);
+
+	// 3) 업로드 & PS slot b1에 바인딩
+	m_pDeviceContext->UpdateSubresource(m_pBlinnCB, 0, nullptr, &bp, 0, 0);
+	m_pDeviceContext->PSSetConstantBuffers(1, 1, &m_pBlinnCB);
 
 	//================================================================================================
 	//IA
@@ -384,6 +412,16 @@ bool TutorialApp::InitScene()
 
 
 	//================================================================================================
+	
+	// 블린퐁 상수 버퍼 만들엇슴
+	{
+		D3D11_BUFFER_DESC bd{};
+		bd.Usage = D3D11_USAGE_DEFAULT;
+		bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		bd.ByteWidth = sizeof(BlinnPhongCB);
+		HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pBlinnCB));
+	}
+
 
 	// 텍스쳐
 	HR_T(CreateDDSTextureFromFile(
@@ -425,6 +463,7 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pConstantBuffer);
 	SAFE_RELEASE(m_pTextureRV);
 	SAFE_RELEASE(m_pSamplerLinear);
+	SAFE_RELEASE(m_pBlinnCB);
 }
 
 //================================================================================================
@@ -594,6 +633,14 @@ void TutorialApp::UpdateImGUI()
 	ImGui::DragFloat("default : 0.001f", &m_Near, 0.01f, 0.001f, 100.0f);
 	ImGui::Text("[Far]");
 	ImGui::DragFloat("default : 1.0f", &m_Far, 0.01f, 1.0f, 5000.0f);
+
+	ImGui::Separator();
+
+	ImGui::Text("[Blinn-Phong Params]");
+	ImGui::ColorEdit3("k_a (ambient refl.)", (float*)&m_Ka);
+	ImGui::SliderFloat("k_s (specular)", &m_Ks, 0.0f, 2.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+	ImGui::SliderFloat("alpha (shininess)", &m_Shininess, 1.0f, 256.0f, "%.0f");
+	ImGui::ColorEdit3("I_a (ambient light)", (float*)&m_Ia);
 
 	ImGui::End();
 

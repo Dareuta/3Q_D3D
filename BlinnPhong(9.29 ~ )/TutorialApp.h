@@ -15,6 +15,8 @@ using namespace DirectX::SimpleMath; // 남발하면 오염됨 아무튼 많이 
 #include <imgui_impl_dx11.h>
 
 
+
+
 class TutorialApp : public GameApp
 {
 public:
@@ -80,7 +82,8 @@ public:
 	ID3D11InputLayout* m_pSkyIL = nullptr;
 
 	//================================================================================================
-
+	// 블링퐁퐁
+	ID3D11Buffer* m_pBlinnCB = nullptr;
 
 
 	bool OnInitialize() override;
@@ -120,7 +123,10 @@ private:
 	Vector3 cubeTransformB = { 5.0f, 0.0f, 0.0f };
 	Vector3 cubeTransformC = { 3.0f, 0.0f, 0.0f };
 
-
+	Vector3 m_Ka = { 0.1f, 0.1f, 0.1f };
+	float   m_Ks = 0.5f;
+	float   m_Shininess = 64.0f;
+	Vector3 m_Ia = { 0.1f, 0.1f, 0.1f };
 	
 };
 
