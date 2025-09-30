@@ -117,7 +117,6 @@ private:
 	Vector3 m_LightColor = { 1,1,1 };  // RGB (색깔) 
 	float m_LightIntensity = 1.0f;     // 0~N (빛의 세기)
 
-
 	Vector3 cubeScale = { 0.7f, 0.7f, 0.7f };
 	Vector3 cubeTransformA = { 0.0f, 0.0f, -20.0f };
 	Vector3 cubeTransformB = { 5.0f, 0.0f, 0.0f };

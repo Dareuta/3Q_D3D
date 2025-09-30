@@ -4,21 +4,19 @@
 
 #include "TutorialApp.h"
 #include "../D3DCore/Helper.h"
+
 #include <d3dcompiler.h>
 #include <Directxtk/DDSTextureLoader.h>
 
 #pragma comment (lib, "d3d11.lib")
 #pragma comment(lib,"d3dcompiler.lib")
 
-// 정점 선언.
 struct Vertex
 {
 	Vector3 position;
 	Vector3 normal;
 	Vector2 tex; 
 };
-
-
 
 struct ConstantBuffer // 상수버퍼
 {
@@ -34,14 +32,11 @@ struct ConstantBuffer // 상수버퍼
 
 struct BlinnPhongCB
 {
-	Vector4 EyePosW;   // (ex,ey,ez,1)
-	Vector4 kA;        // (ka.r,ka.g,ka.b,0)
-	Vector4 kSAlpha;   // (ks, alpha, 0, 0)
-	Vector4 I_ambient; // (Ia.r,Ia.g,Ia.b,0)
+	Vector4 EyePosW;   
+	Vector4 kA;        
+	Vector4 kSAlpha;   
+	Vector4 I_ambient; 
 };
-
-
-
 
 bool TutorialApp::OnInitialize()
 {
@@ -244,7 +239,7 @@ bool TutorialApp::InitScene()
 	//스카이 박스 뚝딱뚝딱
 	//================================================================================================
 
-	HR_T(CreateDDSTextureFromFile(m_pDevice, L"../Resource/Hanako.dds", nullptr, &m_pSkySRV));
+	HR_T(CreateDDSTextureFromFile(m_pDevice, L"../Resource/cubemap.dds", nullptr, &m_pSkySRV));
 
 	D3D11_SAMPLER_DESC skySamp{}; // 샘플러
 	skySamp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -395,11 +390,6 @@ bool TutorialApp::InitScene()
 	HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
 		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShader));
 	SAFE_RELEASE(pixelShaderBuffer);
-
-	//HR_T(CompileShaderFromFile(L"../Resource/SolidPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
-	//HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
-	//	pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShaderSolid));
-	//SAFE_RELEASE(pixelShaderBuffer);
 
 	//================================================================================================
 

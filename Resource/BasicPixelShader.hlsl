@@ -11,7 +11,7 @@ float4 main(PS_INPUT input) : SV_Target
     // N, L, V, H
     float3 N = normalize(input.Norm);
     float3 L = normalize(-vLightDir[0].xyz); // 보통 “빛이 오는 방향”이므로 -dir
-    float3 V = normalize(EyePosW.xyz - input.WorldPos); // 카메라 → 표면
+    float3 V = normalize(EyePosW.xyz - input.WorldPos); // 카메라 → 표면 
     float3 H = normalize(L + V); // Half vector
 
     // 파라미터
