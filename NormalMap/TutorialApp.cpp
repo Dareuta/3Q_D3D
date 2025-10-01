@@ -17,11 +17,11 @@ struct Vertex
 	Vector3 position;
 	Vector3 normal;
 	Vector2 uv;
-	Vector3 tan; // +U 방향
-	Vector3 bit;  // +V 방향
+	Vector4 tan; // +U 방향
+	//Vector3 bit;  // +V 방향
 };
 
-
+// GPU가 기대하고 있는 메모리 레이아웃과 1대1로 대응해야한다
 struct ConstantBuffer // 상수버퍼
 {
 	Matrix mWorld;
@@ -29,9 +29,8 @@ struct ConstantBuffer // 상수버퍼
 	Matrix mProjection;
 	Matrix mWorldInvTranspose;
 
-	Vector4 vLightDir[2]; // 한번에 2개의 광원을 처리하게 설계해서 2개짜리임
-	Vector4 vLightColor[2];
-	Vector4 vOutputColor;
+	Vector4 vLightDir; 
+	Vector4 vLightColor;
 };
 
 struct BlinnPhongCB
@@ -222,10 +221,9 @@ void TutorialApp::OnRender()
 	cb.mView = XMMatrixTranspose(cam);
 	cb.mProjection = XMMatrixTranspose(m_Projection);
 
-	cb.vLightDir[0] = Vector4(dir.x, dir.y, dir.z, 0.0f);
-	cb.vLightColor[0] = Vector4(m_LightColor.x * m_LightIntensity, m_LightColor.y * m_LightIntensity, m_LightColor.z * m_LightIntensity, 1.0f);
-	cb.vLightDir[1] = Vector4(0, 0, 0, 0);
-	cb.vLightColor[1] = Vector4(0, 0, 0, 0);
+	cb.vLightDir = Vector4(dir.x, dir.y, dir.z, 0.0f);
+	cb.vLightColor = Vector4(m_LightColor.x * m_LightIntensity, m_LightColor.y * m_LightIntensity, m_LightColor.z * m_LightIntensity, 1.0f);
+	
 
 	{
 		auto world = m_World;
@@ -318,10 +316,8 @@ bool TutorialApp::InitScene()
 		m_pDevice, m_pDeviceContext,
 		L"../Resource/koyuki.dds",
 		nullptr,
-		&m_pDiffuseSRV
+		&m_pDiffuseSRV, true
 	));
-
-
 
 	// 노말맵은 절대 sRGB 금지(선형 데이터)
 	HR_T(DirectX::CreateWICTextureFromFile(
@@ -339,47 +335,44 @@ bool TutorialApp::InitScene()
 		nullptr, &m_pSpecularSRV, false /*or true if colored*/
 	));
 
-
-
 	Vertex vertices[] =
 	{
-		// Top (+Y)  N=(0,1,0), T=(1,0,0), B=(0,0,-1)
-		{ { -1,  1, -1 }, {0, 1,0}, {1,0}, {1,0,0}, {0,0,-1} },
-		{ {  1,  1, -1 }, {0, 1,0}, {0,0}, {1,0,0}, {0,0,-1} },
-		{ {  1,  1,  1 }, {0, 1,0}, {0,1}, {1,0,0}, {0,0,-1} },
-		{ { -1,  1,  1 }, {0, 1,0}, {1,1}, {1,0,0}, {0,0,-1} },
+		// Top (+Y)  N=(0,1,0),  T=(1,0,0),  B=(0,0,-1), handedness = +1
+		{ { -1,  1, -1 }, {0, 1,0}, {1,0}, { 1,0, 0, +1 } },
+		{ {  1,  1, -1 }, {0, 1,0}, {0,0}, { 1,0, 0, +1 } },
+		{ {  1,  1,  1 }, {0, 1,0}, {0,1}, { 1,0, 0, +1 } },
+		{ { -1,  1,  1 }, {0, 1,0}, {1,1}, { 1,0, 0, +1 } },
 
-		// Bottom (-Y) N=(0,-1,0), T=(1,0,0), B=(0,0,1)
-		{ { -1, -1, -1 }, {0,-1,0}, {0,0}, {1,0,0}, {0,0, 1} },
-		{ {  1, -1, -1 }, {0,-1,0}, {1,0}, {1,0,0}, {0,0, 1} },
-		{ {  1, -1,  1 }, {0,-1,0}, {1,1}, {1,0,0}, {0,0, 1} },
-		{ { -1, -1,  1 }, {0,-1,0}, {0,1}, {1,0,0}, {0,0, 1} },
+		// Bottom (-Y) N=(0,-1,0), T=(1,0,0),  B=(0,0, 1), handedness = +1
+		{ { -1, -1, -1 }, {0,-1,0}, {0,0}, { 1,0, 0, +1 } },
+		{ {  1, -1, -1 }, {0,-1,0}, {1,0}, { 1,0, 0, +1 } },
+		{ {  1, -1,  1 }, {0,-1,0}, {1,1}, { 1,0, 0, +1 } },
+		{ { -1, -1,  1 }, {0,-1,0}, {0,1}, { 1,0, 0, +1 } },
 
-		// Left (-X)  N=(-1,0,0), T=(0,0,1), B=(0,1,0)
-		{ { -1, -1,  1 }, {-1,0,0}, {0,1}, {0,0, 1}, {0,1,0} },
-		{ { -1, -1, -1 }, {-1,0,0}, {1,1}, {0,0, 1}, {0,1,0} },
-		{ { -1,  1, -1 }, {-1,0,0}, {1,0}, {0,0, 1}, {0,1,0} },
-		{ { -1,  1,  1 }, {-1,0,0}, {0,0}, {0,0, 1}, {0,1,0} },
+		// Left (-X)   N=(-1,0,0), T=(0,0,1),  B=(0,1,0), handedness = +1
+		{ { -1, -1,  1 }, {-1,0,0}, {0,1}, { 0,0, 1, +1 } },
+		{ { -1, -1, -1 }, {-1,0,0}, {1,1}, { 0,0, 1, +1 } },
+		{ { -1,  1, -1 }, {-1,0,0}, {1,0}, { 0,0, 1, +1 } },
+		{ { -1,  1,  1 }, {-1,0,0}, {0,0}, { 0,0, 1, +1 } },
 
-		// Right (+X) N=(1,0,0),  T=(0,0,-1),B=(0,1,0)
-		{ {  1, -1,  1 }, {1,0,0}, {1,1}, {0,0,-1}, {0,1,0} },
-		{ {  1, -1, -1 }, {1,0,0}, {0,1}, {0,0,-1}, {0,1,0} },
-		{ {  1,  1, -1 }, {1,0,0}, {0,0}, {0,0,-1}, {0,1,0} },
-		{ {  1,  1,  1 }, {1,0,0}, {1,0}, {0,0,-1}, {0,1,0} },
+		// Right (+X)  N=(1,0,0),  T=(0,0,-1), B=(0,1,0), handedness = +1
+		{ {  1, -1,  1 }, { 1,0,0}, {1,1}, { 0,0,-1, +1 } },
+		{ {  1, -1, -1 }, { 1,0,0}, {0,1}, { 0,0,-1, +1 } },
+		{ {  1,  1, -1 }, { 1,0,0}, {0,0}, { 0,0,-1, +1 } },
+		{ {  1,  1,  1 }, { 1,0,0}, {1,0}, { 0,0,-1, +1 } },
 
-		// Back (-Z)  N=(0,0,-1),T=(-1,0,0),B=(0,1,0)
-		{ { -1, -1, -1 }, {0,0,-1}, {0,1}, {-1,0,0}, {0,1,0} },
-		{ {  1, -1, -1 }, {0,0,-1}, {1,1}, {-1,0,0}, {0,1,0} },
-		{ {  1,  1, -1 }, {0,0,-1}, {1,0}, {-1,0,0}, {0,1,0} },
-		{ { -1,  1, -1 }, {0,0,-1}, {0,0}, {-1,0,0}, {0,1,0} },
+		// Back (-Z)   N=(0,0,-1), T=(-1,0,0), B=(0,1,0), handedness = +1
+		{ { -1, -1, -1 }, {0,0,-1}, {0,1}, { -1,0,0, +1 } },
+		{ {  1, -1, -1 }, {0,0,-1}, {1,1}, { -1,0,0, +1 } },
+		{ {  1,  1, -1 }, {0,0,-1}, {1,0}, { -1,0,0, +1 } },
+		{ { -1,  1, -1 }, {0,0,-1}, {0,0}, { -1,0,0, +1 } },
 
-		// Front (+Z) N=(0,0, 1),T=(1,0,0), B=(0,1,0)
-		{ { -1, -1,  1 }, {0,0, 1}, {1,1}, {1,0,0}, {0,1,0} },
-		{ {  1, -1,  1 }, {0,0, 1}, {0,1}, {1,0,0}, {0,1,0} },
-		{ {  1,  1,  1 }, {0,0, 1}, {0,0}, {1,0,0}, {0,1,0} },
-		{ { -1,  1,  1 }, {0,0, 1}, {1,0}, {1,0,0}, {0,1,0} },
+		// Front (+Z)  N=(0,0, 1), T=(1,0,0),  B=(0,1,0), handedness = +1
+		{ { -1, -1,  1 }, {0,0, 1}, {1,1}, { 1,0,0, +1 } },
+		{ {  1, -1,  1 }, {0,0, 1}, {0,1}, { 1,0,0, +1 } },
+		{ {  1,  1,  1 }, {0,0, 1}, {0,0}, { 1,0,0, +1 } },
+		{ { -1,  1,  1 }, {0,0, 1}, {1,0}, { 1,0,0, +1 } },
 	};
-
 
 	for (auto& v : vertices) {
 		v.normal.Normalize();
@@ -395,16 +388,15 @@ bool TutorialApp::InitScene()
 	vbData.pSysMem = vertices;
 	HR_T(m_pDevice->CreateBuffer(&vbDesc, &vbData, &m_pVertexBuffer));
 
-	m_VertextBufferStride = sizeof(Vertex);
+	m_VertextBufferStride = sizeof(Vertex);	
 	m_VertextBufferOffset = 0;
 
 	D3D11_INPUT_ELEMENT_DESC layout[] =
 	{
-		{ "POSITION",	0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,	D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "NORMAL",		0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12,	D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD",	0, DXGI_FORMAT_R32G32_FLOAT,	0, 24,	D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD",	1, DXGI_FORMAT_R32G32B32_FLOAT, 0, 32,  D3D11_INPUT_PER_VERTEX_DATA, 0 }, // Tangent
-		{ "TEXCOORD",	2, DXGI_FORMAT_R32G32B32_FLOAT, 0, 44,  D3D11_INPUT_PER_VERTEX_DATA, 0 }, // Bitangent
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 }, // Tangent.xyz + handedness.w(좌수 우수)
 	};
 
 	ID3D10Blob* vertexShaderBuffer = nullptr;
