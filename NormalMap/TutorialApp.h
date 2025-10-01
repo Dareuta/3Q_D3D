@@ -113,25 +113,24 @@ private:
 	float spinSpeed = 0.0f;
 
 	float m_FovDegree = 60.0f;    // degrees
-	float m_Near = 0.01f;
-	float m_Far = 40.0f;
+	float m_Near = 0.1f;
+	float m_Far = 100.0f;
 
-	float m_LightYaw = 0.0f;           // -π ~ +π (Y축 기준으로 회전) << 좌우로 회전
-	float m_LightPitch = -0.5f;        // -π/2 ~ +π/2 (하늘/땅 제한용) ( X축 기준으로 회전) << 위 아래로 끄덕
+	float m_LightYaw = XMConvertToRadians(45.0f);         // -π ~ +π (Y축 기준으로 회전) << 좌우로 회전
+	float m_LightPitch = XMConvertToRadians(-20.0f);       // -π/2 ~ +π/2 (하늘/땅 제한용) ( X축 기준으로 회전) << 위 아래로 끄덕
 								       // Roll이라고 있는데 이건 까딱임
 	Vector3 m_LightColor = { 1,1,1 };  // RGB (색깔) 
 	float m_LightIntensity = 1.0f;     // 0~N (빛의 세기)
 
 
-	Vector3 cubeScale = { 0.7f, 0.7f, 0.7f };
+	Vector3 cubeScale = { 5.0f, 5.0f, 5.0f };
 	Vector3 cubeTransformA = { 0.0f, 0.0f, -20.0f };
 	Vector3 cubeTransformB = { 5.0f, 0.0f, 0.0f };
 	Vector3 cubeTransformC = { 3.0f, 0.0f, 0.0f };
 
-	Vector3 m_Ka = { 0.1f, 0.1f, 0.1f };
-	float   m_Ks = 0.5f;
-	float   m_Shininess = 64.0f;
 	Vector3 m_Ia = { 0.1f, 0.1f, 0.1f };
-	
+	Vector3 m_Ka = { 1.0f, 1.0f, 1.0f };
+	float   m_Ks = 0.9f;
+	float   m_Shininess = 64.0f;	
 };
 

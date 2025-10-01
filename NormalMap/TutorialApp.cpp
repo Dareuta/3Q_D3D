@@ -41,9 +41,6 @@ struct BlinnPhongCB
 	Vector4 I_ambient; // (Ia.r,Ia.g,Ia.b,0)
 };
 
-
-
-
 bool TutorialApp::OnInitialize()
 {
 	if (!InitD3D())
@@ -169,9 +166,6 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->UpdateSubresource(m_pBlinnCB, 0, nullptr, &bp, 0, 0);
 	m_pDeviceContext->PSSetConstantBuffers(1, 1, &m_pBlinnCB);
 
-
-
-
 	//================================================================================================
 	//IA
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -210,7 +204,7 @@ void TutorialApp::OnRender()
 	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
 	//================================================================================================
 	XMMATRIX R = XMMatrixRotationRollPitchYaw(m_LightPitch, m_LightYaw, 0.0f);
-	XMVECTOR base = XMVector3Normalize(XMVectorSet(1.0f, 1.0f, -1.0f, 0.0f));
+	XMVECTOR base = XMVector3Normalize(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f));
 	XMVECTOR L = XMVector3Normalize(XMVector3TransformNormal(base, R));
 	Vector3 dir = { XMVectorGetX(L), XMVectorGetY(L), XMVectorGetZ(L) };
 
@@ -243,9 +237,11 @@ void TutorialApp::OnRender()
 	UpdateImGUI();
 #endif
 
-	m_pSwapChain->Present(0, 0);
+	m_pSwapChain->Present(1, 0); // 1,0 << 수직동기화 ON
 }
 
+//================================================================================================
+//////////////////////////////////////////////////////////////////////////////////////////////////
 //================================================================================================
 
 bool TutorialApp::InitScene()
@@ -499,23 +495,6 @@ bool TutorialApp::InitScene()
 	return true;
 }
 
-void TutorialApp::UninitScene()
-{
-	SAFE_RELEASE(m_pVertexBuffer);
-	SAFE_RELEASE(m_pIndexBuffer);
-	SAFE_RELEASE(m_pInputLayout);
-	SAFE_RELEASE(m_pVertexShader);
-	SAFE_RELEASE(m_pPixelShader);
-	//SAFE_RELEASE(m_pPixelShaderSolid);
-	SAFE_RELEASE(m_pConstantBuffer);
-	//SAFE_RELEASE(m_pTextureRV);
-	SAFE_RELEASE(m_pSamplerLinear);
-	SAFE_RELEASE(m_pBlinnCB);
-
-	SAFE_RELEASE(m_pDiffuseSRV);
-	SAFE_RELEASE(m_pNormalSRV);
-	SAFE_RELEASE(m_pSpecularSRV);
-}
 
 //================================================================================================
 
@@ -600,6 +579,26 @@ bool TutorialApp::InitD3D()
 	return true;
 }
 
+//================================================================================================
+
+void TutorialApp::UninitScene()
+{
+	SAFE_RELEASE(m_pVertexBuffer);
+	SAFE_RELEASE(m_pIndexBuffer);
+	SAFE_RELEASE(m_pInputLayout);
+	SAFE_RELEASE(m_pVertexShader);
+	SAFE_RELEASE(m_pPixelShader);
+	//SAFE_RELEASE(m_pPixelShaderSolid);
+	SAFE_RELEASE(m_pConstantBuffer);
+	//SAFE_RELEASE(m_pTextureRV);
+	SAFE_RELEASE(m_pSamplerLinear);
+	SAFE_RELEASE(m_pBlinnCB);
+
+	SAFE_RELEASE(m_pDiffuseSRV);
+	SAFE_RELEASE(m_pNormalSRV);
+	SAFE_RELEASE(m_pSpecularSRV);
+}
+
 void TutorialApp::UninitD3D()
 {
 	SAFE_RELEASE(m_pDepthStencilState);
@@ -628,8 +627,12 @@ bool TutorialApp::InitImGUI()
 {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
-
-	ImGui::StyleColorsDark();
+	ImGui::StyleColorsDark();	
+	//폰트 등록
+	ImGuiIO& io = ImGui::GetIO();
+	const ImWchar* kr = io.Fonts->GetGlyphRangesKorean();
+	io.Fonts->Clear();
+	io.Fonts->AddFontFromFileTTF("../Resource/fonts/Regular.ttf", 16.0f, nullptr, kr);
 
 	ImGui_ImplWin32_Init(m_hWnd);
 	ImGui_ImplDX11_Init(this->m_pDevice, this->m_pDeviceContext);
@@ -643,58 +646,185 @@ void TutorialApp::UninitImGUI()
 	ImGui::DestroyContext();
 }
 
+//void TutorialApp::UpdateImGUI()
+//{
+//	ImGui_ImplDX11_NewFrame();
+//	ImGui_ImplWin32_NewFrame();
+//	ImGui::NewFrame();
+//
+//	ImGui::Begin("Majesty Han's IMGUI"); // 임꾸이
+//
+//	ImGui::Text("[BackGround Color]");
+//	ImGui::ColorEdit3("RGB", color);
+//
+//	ImGui::Separator();
+//
+//	ImGui::Text("[Transform A]");
+//	ImGui::DragFloat3("-10.0f ~ 10.0f##1", (float*)&cubeTransformA, 0.5f, -10.0f, 10.0f);
+//
+//	ImGui::Separator();
+//
+//	ImGui::Text("[Directional Light]");
+//	ImGui::SliderAngle("[Yaw]", &m_LightYaw, -180.0f, 180.0f); // 좌우
+//	ImGui::SliderAngle("[Pitch]", &m_LightPitch, -89.0f, 89.0f); // 90 되면 곤란함 - 위아래
+//	ImGui::ColorEdit3("[Light Color]", (float*)&m_LightColor);
+//	ImGui::SliderFloat("[Intensity]", &m_LightIntensity, 0.0f, 5.0f);
+//
+//	ImGui::Separator();
+//
+//	ImGui::Text("[Scale]");
+//	ImGui::DragFloat3("-10.0f ~ 10.0f##4", (float*)&cubeScale, 0.5f, -10.0f, 10.0f);
+//	ImGui::Text("[SpinSpeed]");
+//	ImGui::SliderFloat("0.0f ~ 100.0f", &spinSpeed, 0.0f, 100.0f);
+//	ImGui::Text("[Camera Control]");
+//	ImGui::Text("[Mouse Right Button + WASD]");
+//
+//	ImGui::Separator();
+//
+//	ImGui::Text("[Fov]");
+//	ImGui::SliderFloat("10.0f ~ 120.0f", &m_FovDegree, 10.0f, 120.0f);
+//	ImGui::Text("[Near]");
+//	ImGui::DragFloat("default : 0.001f", &m_Near, 0.01f, 0.001f, 100.0f);
+//	ImGui::Text("[Far]");
+//	ImGui::DragFloat("default : 1.0f", &m_Far, 0.01f, 1.0f, 5000.0f);
+//
+//	ImGui::Separator();
+//
+//	ImGui::Text("[Blinn-Phong Params]");
+//	ImGui::ColorEdit3("k_a (ambient refl.)", (float*)&m_Ka);
+//	ImGui::SliderFloat("k_s (specular)", &m_Ks, 0.0f, 2.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+//	ImGui::SliderFloat("alpha (shininess)", &m_Shininess, 1.0f, 256.0f, "%.0f");
+//	ImGui::ColorEdit3("I_a (ambient light)", (float*)&m_Ia);
+//
+//	ImGui::End();
+//
+//	ImGui::Render();
+//	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+//}
+
 void TutorialApp::UpdateImGUI()
 {
 	ImGui_ImplDX11_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
 
-	ImGui::Begin("Majesty Han's IMGUI"); // 임꾸이
+	ImGui::SetNextWindowSize(ImVec2(420, 0), ImGuiCond_FirstUseEver);
+	if (ImGui::Begin(u8"임꾸이(IMGUI)"))  // 창 제목만 깔끔히
+	{
+		// 0) 상단 바 — 프레임/리셋
+		ImGui::Text("FPS: %.1f (%.3f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
+		ImGui::Separator();
 
-	ImGui::Text("[BackGround Color]");
-	ImGui::ColorEdit3("RGB", color);
+		// 섹션별 기본값 저장 (최초 한 번)
+		static bool s_inited = false;
+		static Vector3 s_initCubePos{}, s_initCubeScale{};
+		static float   s_initSpin = 0.0f, s_initFov = 60.0f, s_initNear = 0.001f, s_initFar = 1.0f;
+		static Vector3 s_initLightColor{};
+		static float   s_initLightYaw = 0.0f, s_initLightPitch = 0.0f, s_initLightIntensity = 1.0f;
+		static Vector3 s_initKa{}, s_initIa{};
+		static float   s_initKs = 0.5f, s_initShin = 32.0f;
+		if (!s_inited) {
+			s_inited = true;
+			s_initCubePos = cubeTransformA;
+			s_initCubeScale = cubeScale;
+			s_initSpin = spinSpeed;
+			s_initFov = m_FovDegree;
+			s_initNear = m_Near;
+			s_initFar = m_Far;
+			s_initLightColor = m_LightColor;
+			s_initLightYaw = m_LightYaw;
+			s_initLightPitch = m_LightPitch;
+			s_initLightIntensity = m_LightIntensity;
+			s_initKa = m_Ka; s_initIa = m_Ia;
+			s_initKs = m_Ks; s_initShin = m_Shininess;
+		}
 
-	ImGui::Separator();
+		//// 1) Background
+		//if (ImGui::CollapsingHeader("Background"))
+		//{
+		//	ImGui::ColorEdit3("Clear Color", color);
+		//}
 
-	ImGui::Text("[Transform A]");
-	ImGui::DragFloat3("-10.0f ~ 10.0f##1", (float*)&cubeTransformA, 0.5f, -10.0f, 10.0f);
+		// 2) Transform
+		if (ImGui::CollapsingHeader("Transform"))
+		{
+			ImGui::DragFloat3("Position", (float*)&cubeTransformA, 0.05f, -100.0f, 100.0f);
+			ImGui::DragFloat3("Scale", (float*)&cubeScale, 0.01f, 0.001f, 100.0f);
+			ImGui::SliderFloat("Spin Speed", &spinSpeed, 0.0f, 10.0f, "%.2f");
 
-	ImGui::Separator();
+			if (ImGui::Button(u8"변환 초기화")) {
+				cubeTransformA = s_initCubePos;
+				cubeScale = s_initCubeScale;
+				spinSpeed = s_initSpin;
+			}
+		}
 
-	ImGui::Text("[Directional Light]");
-	ImGui::SliderAngle("[Yaw]", &m_LightYaw, -180.0f, 180.0f); // 좌우
-	ImGui::SliderAngle("[Pitch]", &m_LightPitch, -89.0f, 89.0f); // 90 되면 곤란함 - 위아래
-	ImGui::ColorEdit3("[Light Color]", (float*)&m_LightColor);
-	ImGui::SliderFloat("[Intensity]", &m_LightIntensity, 0.0f, 5.0f);
+		// 3) Camera
+		if (ImGui::CollapsingHeader("Camera"))
+		{
+			ImGui::SliderFloat("FOV (deg)", &m_FovDegree, 10.0f, 120.0f, "%.1f");
+			ImGui::DragFloat("Near", &m_Near, 0.001f, 0.0001f, 10.0f, "%.5f");
+			ImGui::DragFloat("Far", &m_Far, 0.1f, 0.01f, 20000.0f);
 
-	ImGui::Separator();
+			if (ImGui::Button(u8"카메라 초기화")) {
+				m_FovDegree = s_initFov; m_Near = s_initNear; m_Far = s_initFar;
+			}
+		}
 
-	ImGui::Text("[Scale]");
-	ImGui::DragFloat3("-10.0f ~ 10.0f##4", (float*)&cubeScale, 0.5f, -10.0f, 10.0f);
-	ImGui::Text("[SpinSpeed]");
-	ImGui::SliderFloat("0.0f ~ 100.0f", &spinSpeed, 0.0f, 100.0f);
-	ImGui::Text("[Camera Control]");
-	ImGui::Text("[Mouse Right Button + WASD]");
+		// 4) Lighting
+		if (ImGui::CollapsingHeader("Lighting"))
+		{
+			ImGui::SliderAngle("Yaw", &m_LightYaw, -180.0f, 180.0f);
+			ImGui::SliderAngle("Pitch", &m_LightPitch, -89.0f, 89.0f);
+			ImGui::ColorEdit3("Color", (float*)&m_LightColor);
+			ImGui::SliderFloat("Intensity", &m_LightIntensity, 0.0f, 5.0f);
 
-	ImGui::Separator();
+			if (ImGui::Button(u8"조명 초기화")) {
+				m_LightColor = s_initLightColor;
+				m_LightYaw = s_initLightYaw;
+				m_LightPitch = s_initLightPitch;
+				m_LightIntensity = s_initLightIntensity;
+			}
+		}
 
-	ImGui::Text("[Fov]");
-	ImGui::SliderFloat("10.0f ~ 120.0f", &m_FovDegree, 10.0f, 120.0f);
-	ImGui::Text("[Near]");
-	ImGui::DragFloat("default : 0.001f", &m_Near, 0.01f, 0.001f, 100.0f);
-	ImGui::Text("[Far]");
-	ImGui::DragFloat("default : 1.0f", &m_Far, 0.01f, 1.0f, 5000.0f);
+		// 5) Material (Blinn-Phong)
+		if (ImGui::CollapsingHeader("Material"))
+		{
+			ImGui::ColorEdit3("I_a (ambient light)", (float*)&m_Ia);
+			ImGui::ColorEdit3("k_a (ambient refl.)", (float*)&m_Ka);
+			ImGui::SliderFloat("k_s (specular)", &m_Ks, 0.0f, 2.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+			ImGui::SliderFloat("shininess", &m_Shininess, 2.0f, 256.0f, "%.0f");
 
-	ImGui::Separator();
 
-	ImGui::Text("[Blinn-Phong Params]");
-	ImGui::ColorEdit3("k_a (ambient refl.)", (float*)&m_Ka);
-	ImGui::SliderFloat("k_s (specular)", &m_Ks, 0.0f, 2.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
-	ImGui::SliderFloat("alpha (shininess)", &m_Shininess, 1.0f, 256.0f, "%.0f");
-	ImGui::ColorEdit3("I_a (ambient light)", (float*)&m_Ia);
+			if (ImGui::Button(u8"재질 초기화")) {
+				m_Ka = s_initKa; m_Ia = s_initIa; m_Ks = s_initKs; m_Shininess = s_initShin;
+			}
+		}
+
+		// 6) Textures preview (SRV가 있으면 썸네일)
+		if (ImGui::CollapsingHeader("Textures"))
+		{
+			const ImVec2 thumb(96, 96);
+			if (m_pDiffuseSRV) { ImGui::Image((ImTextureID)m_pDiffuseSRV, thumb);  ImGui::SameLine(); ImGui::Text("Albedo [t0]"); }
+			if (m_pNormalSRV) { ImGui::Image((ImTextureID)m_pNormalSRV, thumb);  ImGui::SameLine(); ImGui::Text("Normal [t1]"); }
+			if (m_pSpecularSRV) { ImGui::Image((ImTextureID)m_pSpecularSRV, thumb);  ImGui::SameLine(); ImGui::Text("Specular [t2]"); }		
+		}
+
+		//// 7) Debug toggles (필요시 확장)
+		//if (ImGui::CollapsingHeader("Debug"))
+		//{
+		//	static bool showTangentBasis = false;
+		//	static bool flipNormalGreen = false; // 런타임에 쓰려면 PS상수로 전달 필요
+
+		//	ImGui::Checkbox("Visualize Tangent Basis (todo)", &showTangentBasis);
+		//	ImGui::Checkbox("Flip Normal Map Green (runtime flag)", &flipNormalGreen);
+		//	ImGui::SameLine(); HelpMarker("현재 PS는 매크로로 제어. 런타임 제어하려면 작은 CB로 bool 넘겨서 분기하면 됨.");
+		//}
+
+
+	}
 
 	ImGui::End();
-
 	ImGui::Render();
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 }
