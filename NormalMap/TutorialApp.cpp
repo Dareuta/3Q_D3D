@@ -6,6 +6,7 @@
 #include "../D3DCore/Helper.h"
 #include <d3dcompiler.h>
 #include <Directxtk/DDSTextureLoader.h>
+#include <DirectXTK/WICTextureLoader.h> 
 
 #pragma comment (lib, "d3d11.lib")
 #pragma comment(lib,"d3dcompiler.lib")
@@ -15,9 +16,10 @@ struct Vertex
 {
 	Vector3 position;
 	Vector3 normal;
-	Vector2 tex; 
+	Vector2 uv;
+	Vector3 tan; // +U 방향
+	Vector3 bit;  // +V 방향
 };
-
 
 
 struct ConstantBuffer // 상수버퍼
@@ -168,6 +170,9 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->UpdateSubresource(m_pBlinnCB, 0, nullptr, &bp, 0, 0);
 	m_pDeviceContext->PSSetConstantBuffers(1, 1, &m_pBlinnCB);
 
+
+
+
 	//================================================================================================
 	//IA
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -180,7 +185,14 @@ void TutorialApp::OnRender()
 	//PS
 	m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
-	m_pDeviceContext->PSSetShaderResources(0, 1, &m_pTextureRV);
+
+	// 스카이에서 t0만 지웠으니, 본 패스 들어가기 전에 0~2 슬롯 모두 안전하게 null로 초기화(선택)
+	ID3D11ShaderResourceView* nulls3[3] = { nullptr, nullptr, nullptr };
+	m_pDeviceContext->PSSetShaderResources(0, 3, nulls3);
+
+	// 본 패스: 3개 SRV 바인딩
+	ID3D11ShaderResourceView* srvs[3] = { m_pDiffuseSRV, m_pNormalSRV, m_pSpecularSRV };
+	m_pDeviceContext->PSSetShaderResources(0, 3, srvs);
 	m_pDeviceContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
 
 	//================================================================================================
@@ -227,6 +239,7 @@ void TutorialApp::OnRender()
 	}
 
 	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
+	m_pDeviceContext->PSSetShaderResources(0, 3, nulls3);
 
 #ifdef _DEBUG
 	UpdateImGUI();
@@ -269,6 +282,8 @@ bool TutorialApp::InitScene()
 
 	//================================================================================================
 
+
+
 	//vs
 	ID3D10Blob* vsb = nullptr;
 	HR_T(CompileShaderFromFile(L"../Resource/Sky_VS.hlsl", "main", "vs_4_0", &vsb));
@@ -288,45 +303,83 @@ bool TutorialApp::InitScene()
 	SAFE_RELEASE(psb);
 
 	//================================================================================================	
+	// 노말맵 뚝딱뚝딱
+
+
+	// 디퓨즈(알베도)는 sRGB로 디코드되게 로드 = 조명 계산 전에 자동 선형화
+	//HR_T(DirectX::CreateWICTextureFromFile(
+	//	m_pDevice, m_pDeviceContext,
+	//	L"../Resource/Bricks059_1K-JPG_Color.jpg",
+	//	nullptr, &m_pDiffuseSRV, true /*forceSRGB*/
+	//));
+
+
+	HR_T(CreateDDSTextureFromFile(
+		m_pDevice, m_pDeviceContext,
+		L"../Resource/koyuki.dds",
+		nullptr,
+		&m_pDiffuseSRV
+	));
+
+
+
+	// 노말맵은 절대 sRGB 금지(선형 데이터)
+	HR_T(DirectX::CreateWICTextureFromFile(
+		m_pDevice, m_pDeviceContext,
+		L"../Resource/Bricks059_1K-JPG_NormalDX.jpg",
+		nullptr, &m_pNormalSRV, false /*forceSRGB*/
+	));
+
+	// 스펙맵:
+	// - 회색 강도맵이면 보통 선형(= false)
+	// - 컬러 스펙맵이면 sRGB로(= true) → 필요에 맞춰 선택
+	HR_T(DirectX::CreateWICTextureFromFile(
+		m_pDevice, m_pDeviceContext,
+		L"../Resource/Bricks059_Specular.png",
+		nullptr, &m_pSpecularSRV, false /*or true if colored*/
+	));
+
+
 
 	Vertex vertices[] =
 	{
-		// Top (+Y)
-		{ Vector3(-1.0f,  1.0f, -1.0f), Vector3(0, 1, 0), Vector2(1.0f, 0.0f) },
-		{ Vector3(1.0f,  1.0f, -1.0f), Vector3(0, 1, 0), Vector2(0.0f, 0.0f) },
-		{ Vector3(1.0f,  1.0f,  1.0f), Vector3(0, 1, 0), Vector2(0.0f, 1.0f) },
-		{ Vector3(-1.0f,  1.0f,  1.0f), Vector3(0, 1, 0), Vector2(1.0f, 1.0f) },
+		// Top (+Y)  N=(0,1,0), T=(1,0,0), B=(0,0,-1)
+		{ { -1,  1, -1 }, {0, 1,0}, {1,0}, {1,0,0}, {0,0,-1} },
+		{ {  1,  1, -1 }, {0, 1,0}, {0,0}, {1,0,0}, {0,0,-1} },
+		{ {  1,  1,  1 }, {0, 1,0}, {0,1}, {1,0,0}, {0,0,-1} },
+		{ { -1,  1,  1 }, {0, 1,0}, {1,1}, {1,0,0}, {0,0,-1} },
 
-		// Bottom (-Y)
-		{ Vector3(-1.0f, -1.0f, -1.0f), Vector3(0,-1, 0), Vector2(0.0f, 0.0f) },
-		{ Vector3(1.0f, -1.0f, -1.0f), Vector3(0,-1, 0), Vector2(1.0f, 0.0f) },
-		{ Vector3(1.0f, -1.0f,  1.0f), Vector3(0,-1, 0), Vector2(1.0f, 1.0f) },
-		{ Vector3(-1.0f, -1.0f,  1.0f), Vector3(0,-1, 0), Vector2(0.0f, 1.0f) },
+		// Bottom (-Y) N=(0,-1,0), T=(1,0,0), B=(0,0,1)
+		{ { -1, -1, -1 }, {0,-1,0}, {0,0}, {1,0,0}, {0,0, 1} },
+		{ {  1, -1, -1 }, {0,-1,0}, {1,0}, {1,0,0}, {0,0, 1} },
+		{ {  1, -1,  1 }, {0,-1,0}, {1,1}, {1,0,0}, {0,0, 1} },
+		{ { -1, -1,  1 }, {0,-1,0}, {0,1}, {1,0,0}, {0,0, 1} },
 
-		// Left (-X)
-		{ Vector3(-1.0f, -1.0f,  1.0f), Vector3(-1,0,0), Vector2(0.0f, 1.0f) },
-		{ Vector3(-1.0f, -1.0f, -1.0f), Vector3(-1,0,0), Vector2(1.0f, 1.0f) },
-		{ Vector3(-1.0f,  1.0f, -1.0f), Vector3(-1,0,0), Vector2(1.0f, 0.0f) },
-		{ Vector3(-1.0f,  1.0f,  1.0f), Vector3(-1,0,0), Vector2(0.0f, 0.0f) },
+		// Left (-X)  N=(-1,0,0), T=(0,0,1), B=(0,1,0)
+		{ { -1, -1,  1 }, {-1,0,0}, {0,1}, {0,0, 1}, {0,1,0} },
+		{ { -1, -1, -1 }, {-1,0,0}, {1,1}, {0,0, 1}, {0,1,0} },
+		{ { -1,  1, -1 }, {-1,0,0}, {1,0}, {0,0, 1}, {0,1,0} },
+		{ { -1,  1,  1 }, {-1,0,0}, {0,0}, {0,0, 1}, {0,1,0} },
 
-		// Right (+X)
-		{ Vector3(1.0f, -1.0f,  1.0f), Vector3(1,0,0), Vector2(1.0f, 1.0f) },
-		{ Vector3(1.0f, -1.0f, -1.0f), Vector3(1,0,0), Vector2(0.0f, 1.0f) },
-		{ Vector3(1.0f,  1.0f, -1.0f), Vector3(1,0,0), Vector2(0.0f, 0.0f) },
-		{ Vector3(1.0f,  1.0f,  1.0f), Vector3(1,0,0), Vector2(1.0f, 0.0f) },
+		// Right (+X) N=(1,0,0),  T=(0,0,-1),B=(0,1,0)
+		{ {  1, -1,  1 }, {1,0,0}, {1,1}, {0,0,-1}, {0,1,0} },
+		{ {  1, -1, -1 }, {1,0,0}, {0,1}, {0,0,-1}, {0,1,0} },
+		{ {  1,  1, -1 }, {1,0,0}, {0,0}, {0,0,-1}, {0,1,0} },
+		{ {  1,  1,  1 }, {1,0,0}, {1,0}, {0,0,-1}, {0,1,0} },
 
-		// Back (-Z)
-		{ Vector3(-1.0f, -1.0f, -1.0f), Vector3(0,0,-1), Vector2(0.0f, 1.0f) },
-		{ Vector3(1.0f, -1.0f, -1.0f), Vector3(0,0,-1), Vector2(1.0f, 1.0f) },
-		{ Vector3(1.0f,  1.0f, -1.0f), Vector3(0,0,-1), Vector2(1.0f, 0.0f) },
-		{ Vector3(-1.0f,  1.0f, -1.0f), Vector3(0,0,-1), Vector2(0.0f, 0.0f) },
+		// Back (-Z)  N=(0,0,-1),T=(-1,0,0),B=(0,1,0)
+		{ { -1, -1, -1 }, {0,0,-1}, {0,1}, {-1,0,0}, {0,1,0} },
+		{ {  1, -1, -1 }, {0,0,-1}, {1,1}, {-1,0,0}, {0,1,0} },
+		{ {  1,  1, -1 }, {0,0,-1}, {1,0}, {-1,0,0}, {0,1,0} },
+		{ { -1,  1, -1 }, {0,0,-1}, {0,0}, {-1,0,0}, {0,1,0} },
 
-		// Front (+Z)
-		{ Vector3(-1.0f, -1.0f,  1.0f), Vector3(0,0, 1), Vector2(1.0f, 1.0f) },
-		{ Vector3(1.0f, -1.0f,  1.0f), Vector3(0,0, 1), Vector2(0.0f, 1.0f) },
-		{ Vector3(1.0f,  1.0f,  1.0f), Vector3(0,0, 1), Vector2(0.0f, 0.0f) },
-		{ Vector3(-1.0f,  1.0f,  1.0f), Vector3(0,0, 1), Vector2(1.0f, 0.0f) },
+		// Front (+Z) N=(0,0, 1),T=(1,0,0), B=(0,1,0)
+		{ { -1, -1,  1 }, {0,0, 1}, {1,1}, {1,0,0}, {0,1,0} },
+		{ {  1, -1,  1 }, {0,0, 1}, {0,1}, {1,0,0}, {0,1,0} },
+		{ {  1,  1,  1 }, {0,0, 1}, {0,0}, {1,0,0}, {0,1,0} },
+		{ { -1,  1,  1 }, {0,0, 1}, {1,0}, {1,0,0}, {0,1,0} },
 	};
+
 
 	for (auto& v : vertices) {
 		v.normal.Normalize();
@@ -347,9 +400,11 @@ bool TutorialApp::InitScene()
 
 	D3D11_INPUT_ELEMENT_DESC layout[] =
 	{
-		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "POSITION",	0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,	D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "NORMAL",		0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12,	D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD",	0, DXGI_FORMAT_R32G32_FLOAT,	0, 24,	D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD",	1, DXGI_FORMAT_R32G32B32_FLOAT, 0, 32,  D3D11_INPUT_PER_VERTEX_DATA, 0 }, // Tangent
+		{ "TEXCOORD",	2, DXGI_FORMAT_R32G32B32_FLOAT, 0, 44,  D3D11_INPUT_PER_VERTEX_DATA, 0 }, // Bitangent
 	};
 
 	ID3D10Blob* vertexShaderBuffer = nullptr;
@@ -412,7 +467,7 @@ bool TutorialApp::InitScene()
 
 
 	//================================================================================================
-	
+
 	// 블린퐁 상수 버퍼 만들엇슴
 	{
 		D3D11_BUFFER_DESC bd{};
@@ -424,12 +479,12 @@ bool TutorialApp::InitScene()
 
 
 	// 텍스쳐
-	HR_T(CreateDDSTextureFromFile(
-		m_pDevice,
-		L"../Resource/koyuki.dds",
-		nullptr,
-		&m_pTextureRV
-	));
+	//HR_T(CreateDDSTextureFromFile(
+	//	m_pDevice,
+	//	L"../Resource/koyuki.dds",
+	//	nullptr,
+	//	&m_pTextureRV
+	//));
 
 	D3D11_SAMPLER_DESC samp = {};
 	samp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -461,9 +516,13 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pPixelShader);
 	//SAFE_RELEASE(m_pPixelShaderSolid);
 	SAFE_RELEASE(m_pConstantBuffer);
-	SAFE_RELEASE(m_pTextureRV);
+	//SAFE_RELEASE(m_pTextureRV);
 	SAFE_RELEASE(m_pSamplerLinear);
 	SAFE_RELEASE(m_pBlinnCB);
+
+	SAFE_RELEASE(m_pDiffuseSRV);
+	SAFE_RELEASE(m_pNormalSRV);
+	SAFE_RELEASE(m_pSpecularSRV);
 }
 
 //================================================================================================

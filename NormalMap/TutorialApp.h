@@ -65,7 +65,7 @@ public:
 
 	//================================================================================================
 	// 추가한 뭐시기2
-	ID3D11ShaderResourceView* m_pTextureRV = nullptr;	// 텍스처 리소스 뷰.	
+	//ID3D11ShaderResourceView* m_pTextureRV = nullptr;	// 텍스처 리소스 뷰.	
 	ID3D11SamplerState* m_pSamplerLinear = nullptr;
 
 	//================================================================================================
@@ -84,6 +84,11 @@ public:
 	//================================================================================================
 	// 블링퐁퐁
 	ID3D11Buffer* m_pBlinnCB = nullptr;
+
+	// 노말맵맵
+	ID3D11ShaderResourceView* m_pDiffuseSRV = nullptr;
+	ID3D11ShaderResourceView* m_pNormalSRV = nullptr;
+	ID3D11ShaderResourceView* m_pSpecularSRV = nullptr;
 
 
 	bool OnInitialize() override;
