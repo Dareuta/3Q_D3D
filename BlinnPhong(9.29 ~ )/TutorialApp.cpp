@@ -194,7 +194,7 @@ void TutorialApp::OnRender()
 	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
 	//================================================================================================
 	XMMATRIX R = XMMatrixRotationRollPitchYaw(m_LightPitch, m_LightYaw, 0.0f);
-	XMVECTOR base = XMVector3Normalize(XMVectorSet(1.0f, 1.0f, -1.0f, 0.0f));
+	XMVECTOR base = XMVector3Normalize(XMVectorSet(1.0f, 0.0f, 1.0f, 0.0f));
 	XMVECTOR L = XMVector3Normalize(XMVector3TransformNormal(base, R));
 	Vector3 dir = { XMVectorGetX(L), XMVectorGetY(L), XMVectorGetZ(L) };
 
@@ -348,7 +348,7 @@ bool TutorialApp::InitScene()
 	};
 
 	ID3D10Blob* vertexShaderBuffer = nullptr;
-	HR_T(CompileShaderFromFile(L"../Resource/BasicVertexShader.hlsl", "main", "vs_4_0", &vertexShaderBuffer));
+	HR_T(CompileShaderFromFile(L"BasicVertexShader.hlsl", "main", "vs_4_0", &vertexShaderBuffer));
 
 	HR_T(m_pDevice->CreateInputLayout(layout, ARRAYSIZE(layout),
 		vertexShaderBuffer->GetBufferPointer(),
@@ -386,7 +386,7 @@ bool TutorialApp::InitScene()
 	HR_T(m_pDevice->CreateBuffer(&vbDesc, &ibData, &m_pIndexBuffer));
 
 	ID3D10Blob* pixelShaderBuffer = nullptr;
-	HR_T(CompileShaderFromFile(L"../Resource/BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
+	HR_T(CompileShaderFromFile(L"BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
 	HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
 		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShader));
 	SAFE_RELEASE(pixelShaderBuffer);
