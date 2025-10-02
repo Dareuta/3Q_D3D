@@ -140,9 +140,9 @@ void TutorialApp::OnRender()
 	// Draw
 	m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 
-	// SRV 언바인드(다음 패스에서 t0 충돌 방지)
-	ID3D11ShaderResourceView* nullSRV = nullptr;
-	m_pDeviceContext->PSSetShaderResources(0, 1, &nullSRV);
+	//// SRV 언바인드(다음 패스에서 t0 충돌 방지)
+	//ID3D11ShaderResourceView* nullSRV = nullptr;
+	//m_pDeviceContext->PSSetShaderResources(0, 1, &nullSRV);
 
 	// 상태 복구
 	m_pDeviceContext->OMSetDepthStencilState(m_pDepthStencilState, 0);
@@ -168,14 +168,15 @@ void TutorialApp::OnRender()
 
 	//================================================================================================
 	//IA
-	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pVertexBuffer, &m_VertextBufferStride, &m_VertextBufferOffset);
+	//m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	//m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pVertexBuffer, &m_VertextBufferStride, &m_VertextBufferOffset);
 	m_pDeviceContext->IASetInputLayout(m_pInputLayout);
-	m_pDeviceContext->IASetIndexBuffer(m_pIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
+
+	//m_pDeviceContext->IASetIndexBuffer(m_pIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
 	//VS
 	m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 	m_pDeviceContext->VSSetShader(m_pVertexShader, nullptr, 0);
-	//PS
+	//PS 
 	m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
 
@@ -230,8 +231,8 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 	}
 
-	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
-	m_pDeviceContext->PSSetShaderResources(0, 3, nulls3);
+	//m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
+	//m_pDeviceContext->PSSetShaderResources(0, 3, nulls3);
 
 #ifdef _DEBUG
 	UpdateImGUI();
@@ -276,8 +277,6 @@ bool TutorialApp::InitScene()
 
 	//================================================================================================
 
-
-
 	//vs
 	ID3D10Blob* vsb = nullptr;
 	HR_T(CompileShaderFromFile(L"../Resource/Sky_VS.hlsl", "main", "vs_4_0", &vsb));
@@ -299,15 +298,7 @@ bool TutorialApp::InitScene()
 	//================================================================================================	
 	// 노말맵 뚝딱뚝딱
 
-
-	// 디퓨즈(알베도)는 sRGB로 디코드되게 로드 = 조명 계산 전에 자동 선형화
-	//HR_T(DirectX::CreateWICTextureFromFile(
-	//	m_pDevice, m_pDeviceContext,
-	//	L"../Resource/Bricks059_1K-JPG_Color.jpg",
-	//	nullptr, &m_pDiffuseSRV, true /*forceSRGB*/
-	//));
-
-
+	// 알베도
 	HR_T(CreateDDSTextureFromFile(
 		m_pDevice, m_pDeviceContext,
 		L"../Resource/koyuki.dds",
@@ -315,21 +306,21 @@ bool TutorialApp::InitScene()
 		&m_pDiffuseSRV, true
 	));
 
-	// 노말맵은 절대 sRGB 금지(선형 데이터)
+	// 노말맵
 	HR_T(DirectX::CreateWICTextureFromFile(
 		m_pDevice, m_pDeviceContext,
 		L"../Resource/Bricks059_1K-JPG_NormalDX.jpg",
-		nullptr, &m_pNormalSRV, false /*forceSRGB*/
+		nullptr, &m_pNormalSRV, false 
 	));
 
-	// 스펙맵:
-	// - 회색 강도맵이면 보통 선형(= false)
-	// - 컬러 스펙맵이면 sRGB로(= true) → 필요에 맞춰 선택
+	// 스펙큘러
 	HR_T(DirectX::CreateWICTextureFromFile(
 		m_pDevice, m_pDeviceContext,
 		L"../Resource/Bricks059_Specular.png",
-		nullptr, &m_pSpecularSRV, false /*or true if colored*/
+		nullptr, &m_pSpecularSRV, false
 	));
+
+	//====================================================
 
 	Vertex vertices[] =
 	{
@@ -373,6 +364,8 @@ bool TutorialApp::InitScene()
 	for (auto& v : vertices) {
 		v.normal.Normalize();
 	}
+
+	//====================================================
 
 	D3D11_BUFFER_DESC vbDesc = {};
 	vbDesc.ByteWidth = sizeof(Vertex) * ARRAYSIZE(vertices);
@@ -439,11 +432,6 @@ bool TutorialApp::InitScene()
 		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShader));
 	SAFE_RELEASE(pixelShaderBuffer);
 
-	//HR_T(CompileShaderFromFile(L"../Resource/SolidPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
-	//HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
-	//	pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShaderSolid));
-	//SAFE_RELEASE(pixelShaderBuffer);
-
 	//================================================================================================
 
 	// 6. Render() 에서 파이프라인에 바인딩할 상수 버퍼 생성	
@@ -464,15 +452,6 @@ bool TutorialApp::InitScene()
 		bd.ByteWidth = sizeof(BlinnPhongCB);
 		HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pBlinnCB));
 	}
-
-
-	// 텍스쳐
-	//HR_T(CreateDDSTextureFromFile(
-	//	m_pDevice,
-	//	L"../Resource/koyuki.dds",
-	//	nullptr,
-	//	&m_pTextureRV
-	//));
 
 	D3D11_SAMPLER_DESC samp = {};
 	samp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -580,6 +559,7 @@ bool TutorialApp::InitD3D()
 }
 
 //================================================================================================
+// Uninit
 
 void TutorialApp::UninitScene()
 {
@@ -622,6 +602,7 @@ void TutorialApp::UninitD3D()
 }
 
 //================================================================================================
+// 임꾸이
 
 bool TutorialApp::InitImGUI()
 {
@@ -830,7 +811,18 @@ void TutorialApp::UpdateImGUI()
 }
 
 //================================================================================================
+// 생성 함수 정리해줌
 
+void SkyBox() {
+
+}
+
+void Cube() {
+
+
+}
+
+//================================================================================================
 #ifdef _DEBUG
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 #endif
