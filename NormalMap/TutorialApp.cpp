@@ -29,7 +29,7 @@ struct ConstantBuffer // 상수버퍼
 	Matrix mProjection;
 	Matrix mWorldInvTranspose;
 
-	Vector4 vLightDir; 
+	Vector4 vLightDir;
 	Vector4 vLightColor;
 };
 
@@ -112,7 +112,7 @@ void TutorialApp::OnRender()
 	// IA: 스카이용 IL (VB/IB는 기존 큐브 재사용)
 	m_pDeviceContext->IASetInputLayout(m_pSkyIL);
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pVertexBuffer, &m_VertextBufferStride, &m_VertextBufferOffset);
+	m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pVertexBuffer, &m_VertexBufferStride, &m_VertexBufferOffset);
 	m_pDeviceContext->IASetIndexBuffer(m_pIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
 
 	// VS/PS
@@ -124,14 +124,16 @@ void TutorialApp::OnRender()
 	m_Camera.GetViewMatrix(camNoTrans);
 	camNoTrans._41 = camNoTrans._42 = camNoTrans._43 = 0.0f;
 
-	ConstantBuffer skyCB{};
-	skyCB.mWorld = XMMatrixTranspose(XMMatrixIdentity());
-	skyCB.mView = XMMatrixTranspose(camNoTrans);
-	skyCB.mProjection = XMMatrixTranspose(m_Projection);
-	skyCB.mWorldInvTranspose = XMMatrixIdentity(); // 안 씀
+	{
+		ConstantBuffer skyCB{};
+		skyCB.mWorld = XMMatrixTranspose(XMMatrixIdentity());
+		skyCB.mView = XMMatrixTranspose(camNoTrans);
+		skyCB.mProjection = XMMatrixTranspose(m_Projection);
+		skyCB.mWorldInvTranspose = XMMatrixIdentity(); // 안 씀
 
-	m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &skyCB, 0, 0);
-	m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &skyCB, 0, 0);
+		m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+	}
 
 	// 텍스처/샘플러
 	m_pDeviceContext->PSSetShaderResources(0, 1, &m_pSkySRV);
@@ -139,10 +141,6 @@ void TutorialApp::OnRender()
 
 	// Draw
 	m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
-
-	//// SRV 언바인드(다음 패스에서 t0 충돌 방지)
-	//ID3D11ShaderResourceView* nullSRV = nullptr;
-	//m_pDeviceContext->PSSetShaderResources(0, 1, &nullSRV);
 
 	// 상태 복구
 	m_pDeviceContext->OMSetDepthStencilState(m_pDepthStencilState, 0);
@@ -156,23 +154,21 @@ void TutorialApp::OnRender()
 	Vector3 eye(invView._41, invView._42, invView._43);
 
 	// 2) Blinn-Phong 파라미터 채우기
-	BlinnPhongCB bp{};
-	bp.EyePosW = Vector4(eye.x, eye.y, eye.z, 1.0f);
-	bp.kA = Vector4(m_Ka.x, m_Ka.y, m_Ka.z, 0.0f);
-	bp.kSAlpha = Vector4(m_Ks, m_Shininess, 0.0f, 0.0f);
-	bp.I_ambient = Vector4(m_Ia.x, m_Ia.y, m_Ia.z, 0.0f);
+	{
+		BlinnPhongCB bp{};
+		bp.EyePosW = Vector4(eye.x, eye.y, eye.z, 1.0f);
+		bp.kA = Vector4(m_Ka.x, m_Ka.y, m_Ka.z, 0.0f);
+		bp.kSAlpha = Vector4(m_Ks, m_Shininess, 0.0f, 0.0f);
+		bp.I_ambient = Vector4(m_Ia.x, m_Ia.y, m_Ia.z, 0.0f);
 
-	// 3) 업로드 & PS slot b1에 바인딩
-	m_pDeviceContext->UpdateSubresource(m_pBlinnCB, 0, nullptr, &bp, 0, 0);
-	m_pDeviceContext->PSSetConstantBuffers(1, 1, &m_pBlinnCB);
+		// 3) 업로드 & PS slot b1에 바인딩
+		m_pDeviceContext->UpdateSubresource(m_pBlinnCB, 0, nullptr, &bp, 0, 0);
+		m_pDeviceContext->PSSetConstantBuffers(1, 1, &m_pBlinnCB);
+	}
 
 	//================================================================================================
 	//IA
-	//m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	//m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pVertexBuffer, &m_VertextBufferStride, &m_VertextBufferOffset);
 	m_pDeviceContext->IASetInputLayout(m_pInputLayout);
-
-	//m_pDeviceContext->IASetIndexBuffer(m_pIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
 	//VS
 	m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 	m_pDeviceContext->VSSetShader(m_pVertexShader, nullptr, 0);
@@ -202,6 +198,7 @@ void TutorialApp::OnRender()
 	if (m_Far < minFar) m_Far = minFar;
 
 	float aspect = m_ClientWidth / (float)m_ClientHeight;
+
 	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
 	//================================================================================================
 	XMMATRIX R = XMMatrixRotationRollPitchYaw(m_LightPitch, m_LightYaw, 0.0f);
@@ -218,7 +215,7 @@ void TutorialApp::OnRender()
 
 	cb.vLightDir = Vector4(dir.x, dir.y, dir.z, 0.0f);
 	cb.vLightColor = Vector4(m_LightColor.x * m_LightIntensity, m_LightColor.y * m_LightIntensity, m_LightColor.z * m_LightIntensity, 1.0f);
-	
+
 
 	{
 		auto world = m_World;
@@ -230,9 +227,6 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
 		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 	}
-
-	//m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
-	//m_pDeviceContext->PSSetShaderResources(0, 3, nulls3);
 
 #ifdef _DEBUG
 	UpdateImGUI();
@@ -247,78 +241,66 @@ void TutorialApp::OnRender()
 
 bool TutorialApp::InitScene()
 {
-	HRESULT hr = 0;
-
-	//스카이 박스 뚝딱뚝딱
-	//================================================================================================
-
 	HR_T(CreateDDSTextureFromFile(m_pDevice, L"../Resource/cubemap.dds", nullptr, &m_pSkySRV));
+	{
+		D3D11_SAMPLER_DESC skySamp{}; // 샘플러
+		skySamp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+		skySamp.AddressU = skySamp.AddressV = skySamp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+		HR_T(m_pDevice->CreateSamplerState(&skySamp, &m_pSkySampler));
+	}
 
-	D3D11_SAMPLER_DESC skySamp{}; // 샘플러
-	skySamp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-	skySamp.AddressU = skySamp.AddressV = skySamp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-	HR_T(m_pDevice->CreateSamplerState(&skySamp, &m_pSkySampler));
-
-	D3D11_DEPTH_STENCIL_DESC sd{};
-	sd.DepthEnable = TRUE;
-	sd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-	sd.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
-	HR_T(m_pDevice->CreateDepthStencilState(&sd, &m_pSkyDSS));
+	{
+		D3D11_DEPTH_STENCIL_DESC sd{};
+		sd.DepthEnable = TRUE;
+		sd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+		sd.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+		HR_T(m_pDevice->CreateDepthStencilState(&sd, &m_pSkyDSS));
+	}
 
 	// 여기가 그거임, 뒤집기
-	D3D11_RASTERIZER_DESC rs{};
-	rs.FillMode = D3D11_FILL_SOLID;
-	rs.CullMode = D3D11_CULL_FRONT;
-	rs.FrontCounterClockwise = FALSE;
-	//FALSE → 시계방향(CW) 이 Front
-	//TRUE → 반시계(CCW) 가 Front
+	{
+		D3D11_RASTERIZER_DESC rs{};
+		rs.FillMode = D3D11_FILL_SOLID;
+		rs.CullMode = D3D11_CULL_FRONT;
+		rs.FrontCounterClockwise = FALSE; 	//FALSE → 시계방향(CW) 이 Front 	//TRUE → 반시계(CCW) 가 Front
 
-	HR_T(m_pDevice->CreateRasterizerState(&rs, &m_pSkyRS));
+		HR_T(m_pDevice->CreateRasterizerState(&rs, &m_pSkyRS));
+	}
 
 	//================================================================================================
 
 	//vs
-	ID3D10Blob* vsb = nullptr;
-	HR_T(CompileShaderFromFile(L"../Resource/Sky_VS.hlsl", "main", "vs_4_0", &vsb));
-	HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pSkyVS));
+	{
+		ID3D10Blob* vsb = nullptr;
+		HR_T(CompileShaderFromFile(L"../Resource/Sky_VS.hlsl", "main", "vs_4_0", &vsb));
+		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pSkyVS));
 
-	D3D11_INPUT_ELEMENT_DESC skyLayout[] = {
-		{"POSITION", 0 , DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
-	};
+		D3D11_INPUT_ELEMENT_DESC skyLayout[] = {
+			{"POSITION", 0 , DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+		};
 
-	HR_T(m_pDevice->CreateInputLayout(skyLayout, ARRAYSIZE(skyLayout), vsb->GetBufferPointer(), vsb->GetBufferSize(), &m_pSkyIL));
-	SAFE_RELEASE(vsb);
+		HR_T(m_pDevice->CreateInputLayout(skyLayout, ARRAYSIZE(skyLayout), vsb->GetBufferPointer(), vsb->GetBufferSize(), &m_pSkyIL));
+		SAFE_RELEASE(vsb);
+	}
 
 	//ps
-	ID3D10Blob* psb = nullptr;
-	HR_T(CompileShaderFromFile(L"../Resource/Sky_PS.hlsl", "main", "ps_4_0", &psb));
-	HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pSkyPS));
-	SAFE_RELEASE(psb);
+	{
+		ID3D10Blob* psb = nullptr;
+		HR_T(CompileShaderFromFile(L"../Resource/Sky_PS.hlsl", "main", "ps_4_0", &psb));
+		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pSkyPS));
+		SAFE_RELEASE(psb);
+	}
 
-	//================================================================================================	
-	// 노말맵 뚝딱뚝딱
+	//================================================================================================		
 
 	// 알베도
-	HR_T(CreateDDSTextureFromFile(
-		m_pDevice, m_pDeviceContext,
-		L"../Resource/koyuki.dds",
-		nullptr,
-		&m_pDiffuseSRV, true
-	));
+	HR_T(CreateDDSTextureFromFile(m_pDevice, m_pDeviceContext, L"../Resource/koyuki.dds", nullptr, &m_pDiffuseSRV, true));
 
 	// 노말맵
-	HR_T(DirectX::CreateWICTextureFromFile(
-		m_pDevice, m_pDeviceContext,
-		L"../Resource/Bricks059_1K-JPG_NormalDX.jpg",
-		nullptr, &m_pNormalSRV, false 
-	));
+	HR_T(DirectX::CreateWICTextureFromFile(m_pDevice, m_pDeviceContext, L"../Resource/Bricks059_1K-JPG_NormalDX.jpg", nullptr, &m_pNormalSRV, false));
 
 	// 스펙큘러
-	HR_T(DirectX::CreateWICTextureFromFile(
-		m_pDevice, m_pDeviceContext,
-		L"../Resource/Bricks059_Specular.png",
-		nullptr, &m_pSpecularSRV, false
-	));
+	HR_T(DirectX::CreateWICTextureFromFile(m_pDevice, m_pDeviceContext, L"../Resource/Bricks059_Specular.png", nullptr, &m_pSpecularSRV, false));
 
 	//====================================================
 
@@ -373,12 +355,14 @@ bool TutorialApp::InitScene()
 	vbDesc.Usage = D3D11_USAGE_DEFAULT;
 	vbDesc.CPUAccessFlags = 0; // cpu 접근 금지
 
-	D3D11_SUBRESOURCE_DATA vbData = {};
-	vbData.pSysMem = vertices;
-	HR_T(m_pDevice->CreateBuffer(&vbDesc, &vbData, &m_pVertexBuffer));
+	{
+		D3D11_SUBRESOURCE_DATA vbData = {};
+		vbData.pSysMem = vertices;
+		HR_T(m_pDevice->CreateBuffer(&vbDesc, &vbData, &m_pVertexBuffer));
+	}
 
-	m_VertextBufferStride = sizeof(Vertex);	
-	m_VertextBufferOffset = 0;
+	m_VertexBufferStride = sizeof(Vertex);
+	m_VertexBufferOffset = 0;
 
 	D3D11_INPUT_ELEMENT_DESC layout[] =
 	{
@@ -388,21 +372,22 @@ bool TutorialApp::InitScene()
 		{ "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 }, // Tangent.xyz + handedness.w(좌수 우수)
 	};
 
-	ID3D10Blob* vertexShaderBuffer = nullptr;
-	HR_T(CompileShaderFromFile(L"../Resource/BasicVertexShader.hlsl", "main", "vs_4_0", &vertexShaderBuffer));
+	{
+		ID3D10Blob* vertexShaderBuffer = nullptr;
+		HR_T(CompileShaderFromFile(L"../Resource/BasicVertexShader.hlsl", "main", "vs_4_0", &vertexShaderBuffer));
 
-	HR_T(m_pDevice->CreateInputLayout(layout, ARRAYSIZE(layout),
-		vertexShaderBuffer->GetBufferPointer(),
-		vertexShaderBuffer->GetBufferSize(),
-		&m_pInputLayout));
+		HR_T(m_pDevice->CreateInputLayout(layout, ARRAYSIZE(layout),
+			vertexShaderBuffer->GetBufferPointer(),
+			vertexShaderBuffer->GetBufferSize(),
+			&m_pInputLayout));
 
-	HR_T(m_pDevice->CreateVertexShader(
-		vertexShaderBuffer->GetBufferPointer(),
-		vertexShaderBuffer->GetBufferSize(),
-		NULL, &m_pVertexShader));
+		HR_T(m_pDevice->CreateVertexShader(
+			vertexShaderBuffer->GetBufferPointer(),
+			vertexShaderBuffer->GetBufferSize(),
+			NULL, &m_pVertexShader));
 
-	SAFE_RELEASE(vertexShaderBuffer);
-
+		SAFE_RELEASE(vertexShaderBuffer);
+	}
 
 	WORD indices[] =
 	{
@@ -422,15 +407,19 @@ bool TutorialApp::InitScene()
 	vbDesc.Usage = D3D11_USAGE_DEFAULT;
 	vbDesc.CPUAccessFlags = 0; // cpu접근 금지
 
-	D3D11_SUBRESOURCE_DATA ibData = {};
-	ibData.pSysMem = indices;
-	HR_T(m_pDevice->CreateBuffer(&vbDesc, &ibData, &m_pIndexBuffer));
+	{
+		D3D11_SUBRESOURCE_DATA ibData = {};
+		ibData.pSysMem = indices;
+		HR_T(m_pDevice->CreateBuffer(&vbDesc, &ibData, &m_pIndexBuffer));
+	}
 
-	ID3D10Blob* pixelShaderBuffer = nullptr;
-	HR_T(CompileShaderFromFile(L"../Resource/BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
-	HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
-		pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShader));
-	SAFE_RELEASE(pixelShaderBuffer);
+	{
+		ID3D10Blob* pixelShaderBuffer = nullptr;
+		HR_T(CompileShaderFromFile(L"../Resource/BasicPixelShader.hlsl", "main", "ps_4_0", &pixelShaderBuffer));
+		HR_T(m_pDevice->CreatePixelShader(pixelShaderBuffer->GetBufferPointer(),
+			pixelShaderBuffer->GetBufferSize(), NULL, &m_pPixelShader));
+		SAFE_RELEASE(pixelShaderBuffer);
+	}
 
 	//================================================================================================
 
@@ -453,21 +442,21 @@ bool TutorialApp::InitScene()
 		HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pBlinnCB));
 	}
 
-	D3D11_SAMPLER_DESC samp = {};
-	samp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-	samp.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
-	samp.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
-	samp.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
-	samp.ComparisonFunc = D3D11_COMPARISON_NEVER;
-	samp.MinLOD = 0;
-	samp.MaxLOD = D3D11_FLOAT32_MAX;
-	HR_T(m_pDevice->CreateSamplerState(&samp, &m_pSamplerLinear));
+	{
+		D3D11_SAMPLER_DESC samp = {};
+		samp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+		samp.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+		samp.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+		samp.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+		samp.ComparisonFunc = D3D11_COMPARISON_NEVER;
+		samp.MinLOD = 0;
+		samp.MaxLOD = D3D11_FLOAT32_MAX;
+		HR_T(m_pDevice->CreateSamplerState(&samp, &m_pSamplerLinear));
+	}
 
 	//================================================================================================
 
-	// 초기값설정 (MVP)
 	m_World = XMMatrixIdentity();
-
 	float aspect = m_ClientWidth / (FLOAT)m_ClientHeight;
 	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
 
@@ -500,13 +489,10 @@ bool TutorialApp::InitD3D()
 #endif
 	HR_T(D3D11CreateDeviceAndSwapChain(
 		NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
-		creationFlags,
-		NULL, NULL,
-		D3D11_SDK_VERSION,
+		creationFlags, NULL, NULL, D3D11_SDK_VERSION,
 		&swapDesc,
 		&m_pSwapChain,
-		&m_pDevice,
-		NULL,
+		&m_pDevice, NULL,
 		&m_pDeviceContext));
 
 	ID3D11Texture2D* pBackBufferTexture = nullptr;
@@ -608,7 +594,7 @@ bool TutorialApp::InitImGUI()
 {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
-	ImGui::StyleColorsDark();	
+	ImGui::StyleColorsDark();
 	//폰트 등록
 	ImGuiIO& io = ImGui::GetIO();
 	const ImWchar* kr = io.Fonts->GetGlyphRangesKorean();
@@ -626,62 +612,6 @@ void TutorialApp::UninitImGUI()
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
 }
-
-//void TutorialApp::UpdateImGUI()
-//{
-//	ImGui_ImplDX11_NewFrame();
-//	ImGui_ImplWin32_NewFrame();
-//	ImGui::NewFrame();
-//
-//	ImGui::Begin("Majesty Han's IMGUI"); // 임꾸이
-//
-//	ImGui::Text("[BackGround Color]");
-//	ImGui::ColorEdit3("RGB", color);
-//
-//	ImGui::Separator();
-//
-//	ImGui::Text("[Transform A]");
-//	ImGui::DragFloat3("-10.0f ~ 10.0f##1", (float*)&cubeTransformA, 0.5f, -10.0f, 10.0f);
-//
-//	ImGui::Separator();
-//
-//	ImGui::Text("[Directional Light]");
-//	ImGui::SliderAngle("[Yaw]", &m_LightYaw, -180.0f, 180.0f); // 좌우
-//	ImGui::SliderAngle("[Pitch]", &m_LightPitch, -89.0f, 89.0f); // 90 되면 곤란함 - 위아래
-//	ImGui::ColorEdit3("[Light Color]", (float*)&m_LightColor);
-//	ImGui::SliderFloat("[Intensity]", &m_LightIntensity, 0.0f, 5.0f);
-//
-//	ImGui::Separator();
-//
-//	ImGui::Text("[Scale]");
-//	ImGui::DragFloat3("-10.0f ~ 10.0f##4", (float*)&cubeScale, 0.5f, -10.0f, 10.0f);
-//	ImGui::Text("[SpinSpeed]");
-//	ImGui::SliderFloat("0.0f ~ 100.0f", &spinSpeed, 0.0f, 100.0f);
-//	ImGui::Text("[Camera Control]");
-//	ImGui::Text("[Mouse Right Button + WASD]");
-//
-//	ImGui::Separator();
-//
-//	ImGui::Text("[Fov]");
-//	ImGui::SliderFloat("10.0f ~ 120.0f", &m_FovDegree, 10.0f, 120.0f);
-//	ImGui::Text("[Near]");
-//	ImGui::DragFloat("default : 0.001f", &m_Near, 0.01f, 0.001f, 100.0f);
-//	ImGui::Text("[Far]");
-//	ImGui::DragFloat("default : 1.0f", &m_Far, 0.01f, 1.0f, 5000.0f);
-//
-//	ImGui::Separator();
-//
-//	ImGui::Text("[Blinn-Phong Params]");
-//	ImGui::ColorEdit3("k_a (ambient refl.)", (float*)&m_Ka);
-//	ImGui::SliderFloat("k_s (specular)", &m_Ks, 0.0f, 2.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
-//	ImGui::SliderFloat("alpha (shininess)", &m_Shininess, 1.0f, 256.0f, "%.0f");
-//	ImGui::ColorEdit3("I_a (ambient light)", (float*)&m_Ia);
-//
-//	ImGui::End();
-//
-//	ImGui::Render();
-//	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-//}
 
 void TutorialApp::UpdateImGUI()
 {
@@ -719,12 +649,6 @@ void TutorialApp::UpdateImGUI()
 			s_initKa = m_Ka; s_initIa = m_Ia;
 			s_initKs = m_Ks; s_initShin = m_Shininess;
 		}
-
-		//// 1) Background
-		//if (ImGui::CollapsingHeader("Background"))
-		//{
-		//	ImGui::ColorEdit3("Clear Color", color);
-		//}
 
 		// 2) Transform
 		if (ImGui::CollapsingHeader("Transform"))
@@ -788,21 +712,8 @@ void TutorialApp::UpdateImGUI()
 			const ImVec2 thumb(96, 96);
 			if (m_pDiffuseSRV) { ImGui::Image((ImTextureID)m_pDiffuseSRV, thumb);  ImGui::SameLine(); ImGui::Text("Albedo [t0]"); }
 			if (m_pNormalSRV) { ImGui::Image((ImTextureID)m_pNormalSRV, thumb);  ImGui::SameLine(); ImGui::Text("Normal [t1]"); }
-			if (m_pSpecularSRV) { ImGui::Image((ImTextureID)m_pSpecularSRV, thumb);  ImGui::SameLine(); ImGui::Text("Specular [t2]"); }		
+			if (m_pSpecularSRV) { ImGui::Image((ImTextureID)m_pSpecularSRV, thumb);  ImGui::SameLine(); ImGui::Text("Specular [t2]"); }
 		}
-
-		//// 7) Debug toggles (필요시 확장)
-		//if (ImGui::CollapsingHeader("Debug"))
-		//{
-		//	static bool showTangentBasis = false;
-		//	static bool flipNormalGreen = false; // 런타임에 쓰려면 PS상수로 전달 필요
-
-		//	ImGui::Checkbox("Visualize Tangent Basis (todo)", &showTangentBasis);
-		//	ImGui::Checkbox("Flip Normal Map Green (runtime flag)", &flipNormalGreen);
-		//	ImGui::SameLine(); HelpMarker("현재 PS는 매크로로 제어. 런타임 제어하려면 작은 CB로 bool 넘겨서 분기하면 됨.");
-		//}
-
-
 	}
 
 	ImGui::End();
@@ -811,18 +722,7 @@ void TutorialApp::UpdateImGUI()
 }
 
 //================================================================================================
-// 생성 함수 정리해줌
 
-void SkyBox() {
-
-}
-
-void Cube() {
-
-
-}
-
-//================================================================================================
 #ifdef _DEBUG
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 #endif
