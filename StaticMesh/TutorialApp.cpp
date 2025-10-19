@@ -8,8 +8,13 @@
 #include <Directxtk/DDSTextureLoader.h>
 #include <DirectXTK/WICTextureLoader.h> 
 
+#include "AssimpImporter.h"
+#include "StaticMeshMinimal.h"
+
 #pragma comment (lib, "d3d11.lib")
 #pragma comment(lib,"d3dcompiler.lib")
+
+std::unique_ptr<StaticMeshMinimal> gTestMesh;
 
 // 정점 선언.
 struct Vertex
@@ -228,6 +233,8 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 	}
 
+	gTestMesh->Draw(m_pDeviceContext);
+
 #ifdef _DEBUG
 	UpdateImGUI();
 #endif
@@ -241,6 +248,12 @@ void TutorialApp::OnRender()
 
 bool TutorialApp::InitScene()
 {
+	MeshData_PosIndex cpu;	
+	AssimpImporter::LoadFBX_PosIndex(L"../Resource/Zelda/zealdaPosed001.fbx", cpu, true, true);
+
+	gTestMesh = std::make_unique<StaticMeshMinimal>();
+	gTestMesh->Build(m_pDevice, cpu);
+
 	HR_T(CreateDDSTextureFromFile(m_pDevice, L"../Resource/cubemap.dds", nullptr, &m_pSkySRV));
 	{
 		D3D11_SAMPLER_DESC skySamp{}; // 샘플러

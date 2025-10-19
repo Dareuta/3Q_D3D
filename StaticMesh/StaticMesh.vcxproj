@@ -110,6 +110,19 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <PreBuildEvent>
+      <Command>REM Debug
+IF /I "$(ConfigurationName)"=="Debug" (
+  robocopy "C:\path\to\vcpkg\installed\x64-windows\debug\bin" "$(TargetDir)" *.dll /XO /R:0 /W:0
+  exit /b 0
+)
+REM Release
+IF /I "$(ConfigurationName)"=="Release" (
+  robocopy "C:\path\to\vcpkg\installed\x64-windows\bin" "$(TargetDir)" *.dll /XO /R:0 /W:0
+  exit /b 0
+)
+</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -133,10 +146,15 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="AssimpImporter.cpp" />
+    <ClCompile Include="AssimpImporter.h" />
+    <ClCompile Include="StaticMeshMinimal.cpp" />
     <ClCompile Include="TutorialApp.cpp" />
     <ClCompile Include="WinMain.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="MeshData.h" />
+    <ClInclude Include="StaticMeshMinimal.h" />
     <ClInclude Include="TutorialApp.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
