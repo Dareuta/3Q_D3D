@@ -132,5 +132,9 @@ private:
 	Vector3 m_Ka = { 1.0f, 1.0f, 1.0f };
 	float   m_Ks = 0.9f;
 	float   m_Shininess = 64.0f;	
+
+	ID3D11VertexShader* m_pMeshVS{}; 
+	ID3D11PixelShader* m_pMeshPS{}; 
+	ID3D11InputLayout* m_pMeshIL{};
 };
 
