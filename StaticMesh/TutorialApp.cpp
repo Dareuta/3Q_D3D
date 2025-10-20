@@ -4,17 +4,18 @@
 
 #include "TutorialApp.h"
 #include "../D3DCore/Helper.h"
+#include "AssimpImporterEx.h"
+
 #include <d3dcompiler.h>
 #include <Directxtk/DDSTextureLoader.h>
 #include <DirectXTK/WICTextureLoader.h> 
 
-#include "AssimpImporter.h"
-#include "StaticMeshMinimal.h"
-
 #pragma comment (lib, "d3d11.lib")
 #pragma comment(lib,"d3dcompiler.lib")
 
-std::unique_ptr<StaticMeshMinimal> gTestMesh;
+using namespace DirectX::SimpleMath; // 남발하면 오염됨 아무튼 많이 쓰지 마셈
+
+std::unique_ptr<StaticMesh> gTestMesh;
 
 // 정점 선언.
 struct Vertex
@@ -44,6 +45,14 @@ struct BlinnPhongCB
 	Vector4 kA;        // (ka.r,ka.g,ka.b,0)
 	Vector4 kSAlpha;   // (ks, alpha, 0, 0)
 	Vector4 I_ambient; // (Ia.r,Ia.g,Ia.b,0)
+};
+
+
+struct UseCB {
+	UINT  useDiffuse, useNormal, useSpecular, useEmissive;
+	UINT  useOpacity;
+	float alphaCut;
+	float pad[2];
 };
 
 bool TutorialApp::OnInitialize()
@@ -96,48 +105,106 @@ void TutorialApp::OnUpdate()
 }
 
 //================================================================================================
-
 void TutorialApp::OnRender()
-{
-	// 바인딩 & 클리어
-	m_pDeviceContext->OMSetRenderTargets(1, &m_pRenderTargetView, m_pDepthStencilView);
+{	
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
 	m_pDeviceContext->ClearDepthStencilView(
-		m_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
-
-	// 셰이더/IL/토폴로지
+		m_pDepthStencilView,
+		D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL,
+		1.0f, 0);
+	// ===== 1) 파이프라인 셋업 =====
 	m_pDeviceContext->IASetInputLayout(m_pMeshIL);
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	m_pDeviceContext->VSSetShader(m_pMeshVS, nullptr, 0);
 	m_pDeviceContext->PSSetShader(m_pMeshPS, nullptr, 0);
+	if (m_pSamplerLinear) m_pDeviceContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
 
-	// 상수버퍼 업데이트 (World/View/Proj 만 사용)
-	Matrix view;
-	m_Camera.GetViewMatrix(view);
+	// ===== 2) 공통 CB0(뷰/프로젝션/라이트) + b1(카메라/재질) =====
+	Matrix view; m_Camera.GetViewMatrix(view);
+
+	// 간단한 방향광(헤더 멤버: m_LightYaw, m_LightPitch, m_LightColor, m_LightIntensity)
+	Vector3 L(
+		cosf(m_LightYaw) * cosf(m_LightPitch),
+		sinf(m_LightPitch),
+		sinf(m_LightYaw) * cosf(m_LightPitch)
+	);
 
 	ConstantBuffer cb{};
-	cb.mWorld = XMMatrixTranspose(m_World);
+	cb.mWorld = XMMatrixTranspose(Matrix::Identity);        // 개별 드로우에서 바꿔치기
 	cb.mView = XMMatrixTranspose(view);
 	cb.mProjection = XMMatrixTranspose(m_Projection);
-	cb.mWorldInvTranspose = XMMatrixIdentity(); // 안 씀
-	cb.vLightDir = Vector4(0, 0, 0, 0);   // 안 씀
-	cb.vLightColor = Vector4(0, 0, 0, 0);   // 안 씀
+	cb.mWorldInvTranspose = XMMatrixTranspose(Matrix::Identity.Invert().Transpose());
+	cb.vLightDir = Vector4(L.x, L.y, L.z, 0.0f);
+	cb.vLightColor = Vector4(m_LightColor.x, m_LightColor.y, m_LightColor.z, 0.0f) * m_LightIntensity;
 
 	m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
 	m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
-	// (PS에서 상수 안 쓰면 PSSetConstantBuffers는 생략)
+	m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 
-	// FBX(static mesh) 드로우
-	if (gTestMesh) {
-		gTestMesh->Draw(m_pDeviceContext);
-	}
+	// b1: 카메라/재질 파라미터 (헤더 멤버: m_Ka, m_Ks, m_Shininess, m_Ia)
+	BlinnPhongCB bp{};
+	const Vector3 eye = m_Camera.m_World.Translation();
+	bp.EyePosW = Vector4(eye.x, eye.y, eye.z, 1.0f);
+	bp.kA = Vector4(m_Ka.x, m_Ka.y, m_Ka.z, 0.0f);
+	bp.kSAlpha = Vector4(m_Ks, m_Shininess, 0.0f, 0.0f);
+	bp.I_ambient = Vector4(m_Ia.x, m_Ia.y, m_Ia.z, 0.0f);
+
+	m_pDeviceContext->UpdateSubresource(m_pBlinnCB, 0, nullptr, &bp, 0, 0);
+	m_pDeviceContext->PSSetConstantBuffers(1, 1, &m_pBlinnCB);
+
+	// ===== 3) 드로우 람다 (서브메시별 머티리얼 바인딩 + b2 USE 플래그) =====
+	auto DrawModel = [&](StaticMesh& mesh,
+		const std::vector<MaterialGPU>& mtls,
+		const Matrix& world,
+		float alphaCut)
+		{
+			// CB0: 월드만 바꿔서 다시 업로드
+			ConstantBuffer local = cb;
+			local.mWorld = XMMatrixTranspose(world);
+			local.mWorldInvTranspose = XMMatrixTranspose(world.Invert().Transpose());
+			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
+
+			// 서브메시 루프
+			for (size_t i = 0; i < mesh.Ranges().size(); ++i)
+			{
+				const auto& r = mesh.Ranges()[i];
+				const auto& mat = mtls[r.materialIndex];
+
+				// t0..t4 : Diffuse, Normal, Specular, Emissive, Opacity
+				mat.Bind(m_pDeviceContext);
+
+
+				UseCB use{};
+				use.useDiffuse = mat.hasDiffuse ? 1u : 0u;
+				use.useNormal = mat.hasNormal ? 1u : 0u;
+				use.useSpecular = mat.hasSpecular ? 1u : 0u;
+				use.useEmissive = mat.hasEmissive ? 1u : 0u;
+				use.useOpacity = mat.hasOpacity ? 1u : 0u;
+				use.alphaCut = alphaCut;
+
+				m_pDeviceContext->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
+				m_pDeviceContext->PSSetConstantBuffers(2, 1, &m_pUseCB);
+
+				// 실제 드로우
+				mesh.DrawSubmesh(m_pDeviceContext, i);
+
+				// SRV 언바인드(디버그 런타임 경고 방지 습관)
+				MaterialGPU::Unbind(m_pDeviceContext);
+			}
+		};
+
+	// ===== 4) 한 화면에 3개 렌더 =====
+	// 트리/젤다는 컷아웃 필요(Opacity) → alphaCut 0.5f 권장
+	DrawModel(gTree, gTreeMtls, Matrix::CreateTranslation(-10.0f, 0.0f, -20.0f), 0.5f);
+	DrawModel(gChar, gCharMtls, Matrix::CreateTranslation(0.0f, 0.0f, -20.0f), 0.0f);
+	DrawModel(gZelda, gZeldaMtls, Matrix::CreateTranslation(10.0f, 0.0f, -20.0f), 0.5f);
 
 #ifdef _DEBUG
 	UpdateImGUI();
 #endif
+
 	m_pSwapChain->Present(1, 0);
 }
-
 
 //================================================================================================
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -145,54 +212,99 @@ void TutorialApp::OnRender()
 
 bool TutorialApp::InitScene()
 {
-	// 1) FBX 로드 → CPU 메쉬
-	MeshData_PosIndex cpu;
-	// (pos/idx만 빼오도록 만든 기존 함수 그대로 사용)
-	AssimpImporter::LoadFBX_PosIndex(
-		L"../Resource/Zelda/zeldaPosed001.fbx",
-		cpu,
-		/*calcTangent*/ true,
-		/*flipUV*/     true);
-
-	// 2) GPU 메쉬 생성 (VB/IB)
-	gTestMesh = std::make_unique<StaticMeshMinimal>();
-	gTestMesh->Build(m_pDevice, cpu);
-
-	// 3) POSITION-only 셰이더/IL
+	// 1) PNTT 셰이더/IL =================================================================
 	{
 		ID3D10Blob* vsb = nullptr;
-		HR_T(CompileShaderFromFile(L"Shader/PosOnly_VS.hlsl", "main", "vs_4_0", &vsb));
+		HR_T(CompileShaderFromFile(L"Shader/Mesh_PNTT_VS.hlsl", "main", "vs_5_0", &vsb));
 		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pMeshVS));
 
 		D3D11_INPUT_ELEMENT_DESC il[] = {
-			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+			{ "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+			{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+			{ "TANGENT",  0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 		};
 		HR_T(m_pDevice->CreateInputLayout(il, _countof(il), vsb->GetBufferPointer(), vsb->GetBufferSize(), &m_pMeshIL));
 		SAFE_RELEASE(vsb);
-	}
-	{
+
 		ID3D10Blob* psb = nullptr;
-		HR_T(CompileShaderFromFile(L"Shader/PosOnly_PS.hlsl", "main", "ps_4_0", &psb));
+		HR_T(CompileShaderFromFile(L"Shader/Mesh_PNTT_PS.hlsl", "main", "ps_5_0", &psb));
 		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pMeshPS));
 		SAFE_RELEASE(psb);
 	}
 
-	// 4) 상수버퍼 (World/View/Proj만 사용)
+	// 2) 상수버퍼(CB0, b1, b2) + 샘플러 ==================================================
 	{
-		D3D11_BUFFER_DESC bd{};
-		bd.Usage = D3D11_USAGE_DEFAULT;
-		bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-		bd.ByteWidth = sizeof(ConstantBuffer);
-		HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pConstantBuffer));
+		// CB0: World/View/Proj/WorldInvTranspose + Light
+		if (!m_pConstantBuffer) {
+			D3D11_BUFFER_DESC bd{};
+			bd.Usage = D3D11_USAGE_DEFAULT;
+			bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+			bd.ByteWidth = sizeof(ConstantBuffer);
+			HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pConstantBuffer));
+		}
+
+		// BlinnPhong(b1): Eye, kA, kSAlpha, I_ambient
+		if (!m_pBlinnCB) {
+			D3D11_BUFFER_DESC bd{};
+			bd.Usage = D3D11_USAGE_DEFAULT;
+			bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+			bd.ByteWidth = sizeof(BlinnPhongCB);
+			HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pBlinnCB));
+		}
+
+		// UseCB(b2): 텍스처 사용 플래그 + alphaCut
+		if (!m_pUseCB) {
+			D3D11_BUFFER_DESC bd{};
+			bd.Usage = D3D11_USAGE_DEFAULT;
+			bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+			bd.ByteWidth = sizeof(UseCB);
+			HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pUseCB));
+		}
+
+		// PS 샘플러(Linear Wrap)
+		if (!m_pSamplerLinear) {
+			D3D11_SAMPLER_DESC sd{};
+			sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+			sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+			sd.MaxLOD = D3D11_FLOAT32_MAX;
+			HR_T(m_pDevice->CreateSamplerState(&sd, &m_pSamplerLinear));
+		}
 	}
 
-	// 5) 기본 트랜스폼/프로젝션
-	m_World = XMMatrixIdentity();
-	float aspect = m_ClientWidth / (float)m_ClientHeight;
-	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
+	// 3) FBX 로딩 + GPU 업로드 ============================================================
+	{
+		// 확장 임포터 + GPU 빌더
+		auto BuildAll = [&](const std::wstring& fbx, const std::wstring& texDir,
+			StaticMesh& mesh, std::vector<MaterialGPU>& mtls)
+			{
+				MeshData_PNTT cpu;
+				// flipUV = true 권장, 좌표계는 LH
+				if (!AssimpImporterEx::LoadFBX_PNTT_AndMaterials(fbx, cpu, /*flipUV*/true, /*leftHanded*/true))
+					throw std::runtime_error("FBX load failed");
+
+				if (!mesh.Build(m_pDevice, cpu))
+					throw std::runtime_error("Mesh build failed");
+
+				mtls.resize(cpu.materials.size());
+				for (size_t i = 0; i < cpu.materials.size(); ++i) {
+					mtls[i].Build(m_pDevice, cpu.materials[i], texDir);
+				}
+			};
+
+		// 과제 명세: tree( diffuse, opacity ), character( diffuse, normal, specular, emissive ), zelda( diffuse, opacity )
+		// 경로는 네 프로젝트 구조에 맞게 조정해줘.
+		BuildAll(L"../Resource/tree/Tree.fbx", L"../Resource/Tree/", gTree, gTreeMtls);
+		BuildAll(L"../Resource/character/Character.fbx", L"../Resource/Character/", gChar, gCharMtls);
+		BuildAll(L"../Resource/Zelda/zeldaPosed001.fbx", L"../Resource/Zelda/", gZelda, gZeldaMtls);
+	}
+
+	// 4) 초기 프로젝션/월드 값(있다면 유지) ==============================================
+	// - m_Projection, m_World 등은 네 기존 코드 흐름(윈도우 리사이즈/카메라 세팅)에서 갱신되므로 여기선 건드리지 않아도 OK.
 
 	return true;
 }
+
 
 //================================================================================================
 
@@ -288,6 +400,7 @@ void TutorialApp::UninitScene()
 
 	// (StaticMeshMinimal가 내부에서 Release 하는 구조면) 이 한 줄이면 GPU 버퍼 정리됨
 	gTestMesh.reset();
+	SAFE_RELEASE(m_pUseCB);         // ★ 추가
 
 	SAFE_RELEASE(m_pVertexBuffer);
 	SAFE_RELEASE(m_pIndexBuffer);

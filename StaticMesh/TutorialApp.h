@@ -7,14 +7,16 @@
 #include "../D3DCore/GameApp.h"
 #include <d3d11.h> // ID3D11Device, …Context, …Buffer 등을 포함
 
+#include "StaticMesh.h"
+#include "Material.h"
+
+
 #include <directxtk/SimpleMath.h> // 경량 수학 타입(Vector2/3/4, Matrix 등)
-using namespace DirectX::SimpleMath; // 남발하면 오염됨 아무튼 많이 쓰지 마셈
+
 
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
-
-
 
 
 class TutorialApp : public GameApp
@@ -136,5 +138,9 @@ private:
 	ID3D11VertexShader* m_pMeshVS{}; 
 	ID3D11PixelShader* m_pMeshPS{}; 
 	ID3D11InputLayout* m_pMeshIL{};
+
+	ID3D11Buffer* m_pUseCB = nullptr;
+	StaticMesh gTree, gChar, gZelda;
+	std::vector<MaterialGPU> gTreeMtls, gCharMtls, gZeldaMtls;
 };
 
