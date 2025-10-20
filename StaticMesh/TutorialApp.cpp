@@ -80,7 +80,9 @@ void TutorialApp::OnUpdate()
 void TutorialApp::OnRender()
 {
 	m_pDeviceContext->RSSetState(m_pNoCullRS);
+
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
+
 	m_pDeviceContext->ClearDepthStencilView(
 		m_pDepthStencilView,
 		D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL,
@@ -111,7 +113,7 @@ void TutorialApp::OnRender()
 	cb.mWorld = XMMatrixTranspose(Matrix::Identity);        // 개별 드로우에서 바꿔치기
 	cb.mView = XMMatrixTranspose(view);
 	cb.mProjection = XMMatrixTranspose(m_Projection);
-	cb.mWorldInvTranspose = XMMatrixTranspose(Matrix::Identity.Invert().Transpose());
+	cb.mWorldInvTranspose = XMMatrixTranspose(Matrix::Identity.Invert());
 	cb.vLightDir = Vector4(L.x, L.y, L.z, 0.0f);
 	cb.vLightColor = Vector4(m_LightColor.x, m_LightColor.y, m_LightColor.z, 0.0f) * m_LightIntensity;
 
@@ -138,7 +140,7 @@ void TutorialApp::OnRender()
 			// CB0: 월드만 바꿔서 다시 업로드
 			ConstantBuffer local = cb;
 			local.mWorld = XMMatrixTranspose(world);
-			local.mWorldInvTranspose = XMMatrixTranspose(world.Invert().Transpose());
+			local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
 			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 
 			// 서브메시 루프
@@ -190,20 +192,22 @@ bool TutorialApp::InitScene()
 	// 1) PNTT 셰이더/IL =================================================================
 	{
 		ID3D10Blob* vsb = nullptr;
-		HR_T(CompileShaderFromFile(L"Shader/Mesh_PNTT_VS.hlsl", "main", "vs_5_0", &vsb));
+		HR_T(CompileShaderFromFile(L"Shader/VertexShader.hlsl", "main", "vs_5_0", &vsb));
 		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pMeshVS));
 
-		D3D11_INPUT_ELEMENT_DESC il[] = {
+		D3D11_INPUT_ELEMENT_DESC il[] =
+		{
 			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 			{ "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 			{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-			{ "TANGENT",  0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+			{ "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 		};
+
 		HR_T(m_pDevice->CreateInputLayout(il, _countof(il), vsb->GetBufferPointer(), vsb->GetBufferSize(), &m_pMeshIL));
 		SAFE_RELEASE(vsb);
 
 		ID3D10Blob* psb = nullptr;
-		HR_T(CompileShaderFromFile(L"Shader/Mesh_PNTT_PS.hlsl", "main", "ps_5_0", &psb));
+		HR_T(CompileShaderFromFile(L"Shader/PixelShader.hlsl", "main", "ps_5_0", &psb));
 		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pMeshPS));
 		SAFE_RELEASE(psb);
 	}
@@ -380,7 +384,7 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pConstantBuffer);
 
 	SAFE_RELEASE(m_pUseCB);
-
+	SAFE_RELEASE(m_pNoCullRS);
 	SAFE_RELEASE(m_pSamplerLinear);
 	SAFE_RELEASE(m_pBlinnCB);
 

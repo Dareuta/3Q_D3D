@@ -10,14 +10,11 @@
 #include "StaticMesh.h"
 #include "Material.h"
 
-
 #include <directxtk/SimpleMath.h> // 경량 수학 타입(Vector2/3/4, Matrix 등)
-
 
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
-
 
 class TutorialApp : public GameApp
 {
@@ -34,45 +31,31 @@ public:
 	ID3D11Device* m_pDevice = nullptr;						// 디바이스
 	ID3D11DeviceContext* m_pDeviceContext = nullptr;		// 즉시 디바이스 컨텍스트
 	IDXGISwapChain* m_pSwapChain = nullptr;					// 스왑체인
-	ID3D11RenderTargetView* m_pRenderTargetView = nullptr;	// 렌더링 타겟뷰
-	//================================================================================================
-		
-
-
-	//================================================================================================
-	// 추가한 뭐시기
+	ID3D11RenderTargetView* m_pRenderTargetView = nullptr;	// 렌더링 타겟뷰		
 	ID3D11Buffer* m_pConstantBuffer = nullptr;			// 상수 버퍼.	
-	XMMATRIX m_Projection;			// 단위장치좌표계( Normalized Device Coordinate) 공간으로 변환을 위한 행렬.
-
+	DirectX::SimpleMath::Matrix m_Projection;			// 단위장치좌표계( Normalized Device Coordinate) 공간으로 변환을 위한 행렬.
 	ID3D11Texture2D* m_pDepthStencil = nullptr;
 	ID3D11DepthStencilView* m_pDepthStencilView = nullptr;
 	ID3D11DepthStencilState* m_pDepthStencilState = nullptr;
-
-	//================================================================================================
-	// 추가한 뭐시기2
-	//ID3D11ShaderResourceView* m_pTextureRV = nullptr;	// 텍스처 리소스 뷰.	
-	ID3D11SamplerState* m_pSamplerLinear = nullptr;	
-
-
-	//================================================================================================
-	// 블링퐁퐁
+	ID3D11SamplerState* m_pSamplerLinear = nullptr;		
 	ID3D11Buffer* m_pBlinnCB = nullptr;
+
+	//================================================================================================
 				
 	bool OnInitialize() override;
 	void OnUninitialize() override;
 	void OnUpdate() override;
 	void OnRender() override;
-
 	bool InitD3D();
 	void UninitD3D();
-
 	bool InitImGUI();
 	void UninitImGUI();
 	void UpdateImGUI();
-	virtual LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
-
 	bool InitScene();		// 쉐이더,버텍스,인덱스
 	void UninitScene();
+
+	virtual LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+
 	//================================================================================================
 
 private:

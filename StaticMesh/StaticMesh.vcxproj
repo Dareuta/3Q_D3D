@@ -147,8 +147,6 @@ endlocal
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="AssimpImporter.cpp" />
-    <ClCompile Include="AssimpImporter.h" />
     <ClCompile Include="AssimpImporterEX.cpp" />
     <ClCompile Include="Material.cpp" />
     <ClCompile Include="MeshDataEx.h" />
@@ -159,16 +157,21 @@ endlocal
   <ItemGroup>
     <ClInclude Include="AssimpImporterEX.h" />
     <ClInclude Include="Material.h" />
-    <ClInclude Include="MeshData.h" />
     <ClInclude Include="StaticMesh.h" />
     <ClInclude Include="TutorialApp.h" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="Shader\PixelShader.hlsl" />
-    <FxCompile Include="Shader\VertexShader.hlsl" />
+    <FxCompile Include="Shader\PixelShader.hlsl">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+    </FxCompile>
+    <FxCompile Include="Shader\VertexShader.hlsl">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="Shader\Shared.hlsli" />
+    <None Include="Shader\Shared.hlsli">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+    </None>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
