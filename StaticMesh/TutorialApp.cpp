@@ -7,25 +7,11 @@
 #include "AssimpImporterEx.h"
 
 #include <d3dcompiler.h>
-#include <Directxtk/DDSTextureLoader.h>
-#include <DirectXTK/WICTextureLoader.h> 
 
 #pragma comment (lib, "d3d11.lib")
 #pragma comment(lib,"d3dcompiler.lib")
 
 using namespace DirectX::SimpleMath; // 남발하면 오염됨 아무튼 많이 쓰지 마셈
-
-std::unique_ptr<StaticMesh> gTestMesh;
-
-// 정점 선언.
-struct Vertex
-{
-	Vector3 position;
-	Vector3 normal;
-	Vector2 uv;
-	Vector4 tan; // +U 방향
-	//Vector3 bit;  // +V 방향
-};
 
 // GPU가 기대하고 있는 메모리 레이아웃과 1대1로 대응해야한다
 struct ConstantBuffer // 상수버퍼
@@ -87,31 +73,23 @@ void TutorialApp::OnUninitialize()
 
 void TutorialApp::OnUpdate()
 {
-	float t = GameTimer::m_Instance->TotalTime();
 
-	XMMATRIX mSpin = XMMatrixRotationY(t * spinSpeed);
-
-	XMMATRIX mScaleA = XMMatrixScaling(cubeScale.x, cubeScale.y, cubeScale.z);
-	XMMATRIX mScaleB = XMMatrixScaling(cubeScale.x * 0.6f, cubeScale.y * 0.6f, cubeScale.z * 0.6f);
-	XMMATRIX mScaleC = XMMatrixScaling(cubeScale.x * 0.3f, cubeScale.y * 0.3f, cubeScale.z * 0.3f);
-
-	XMMATRIX mTranslateA = XMMatrixTranslation(cubeTransformA.x, cubeTransformA.y, cubeTransformA.z);
-	XMMATRIX mTranslateB = XMMatrixTranslation(cubeTransformB.x, cubeTransformB.y, cubeTransformB.z);
-	XMMATRIX mTranslateC = XMMatrixTranslation(cubeTransformC.x, cubeTransformC.y, cubeTransformC.z);
-
-	//오브젝트
-	XMMATRIX tmpA = mSpin * mTranslateA;
-	m_World = mScaleA * tmpA;
 }
 
 //================================================================================================
 void TutorialApp::OnRender()
-{	
+{
+	m_pDeviceContext->RSSetState(m_pNoCullRS);
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
 	m_pDeviceContext->ClearDepthStencilView(
 		m_pDepthStencilView,
 		D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL,
 		1.0f, 0);
+
+	float aspect = (float)m_ClientWidth / (float)m_ClientHeight;
+	m_Projection = Matrix::CreatePerspectiveFieldOfView(
+
+		DirectX::XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
 	// ===== 1) 파이프라인 셋업 =====
 	m_pDeviceContext->IASetInputLayout(m_pMeshIL);
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -155,8 +133,7 @@ void TutorialApp::OnRender()
 	// ===== 3) 드로우 람다 (서브메시별 머티리얼 바인딩 + b2 USE 플래그) =====
 	auto DrawModel = [&](StaticMesh& mesh,
 		const std::vector<MaterialGPU>& mtls,
-		const Matrix& world,
-		float alphaCut)
+		const Matrix& world)
 		{
 			// CB0: 월드만 바꿔서 다시 업로드
 			ConstantBuffer local = cb;
@@ -180,7 +157,7 @@ void TutorialApp::OnRender()
 				use.useSpecular = mat.hasSpecular ? 1u : 0u;
 				use.useEmissive = mat.hasEmissive ? 1u : 0u;
 				use.useOpacity = mat.hasOpacity ? 1u : 0u;
-				use.alphaCut = alphaCut;
+				use.alphaCut = mat.hasOpacity ? 0.5f : -1.0f; // ★ 핵심
 
 				m_pDeviceContext->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
 				m_pDeviceContext->PSSetConstantBuffers(2, 1, &m_pUseCB);
@@ -193,11 +170,11 @@ void TutorialApp::OnRender()
 			}
 		};
 
-	// ===== 4) 한 화면에 3개 렌더 =====
-	// 트리/젤다는 컷아웃 필요(Opacity) → alphaCut 0.5f 권장
-	DrawModel(gTree, gTreeMtls, Matrix::CreateTranslation(-10.0f, 0.0f, -20.0f), 0.5f);
-	DrawModel(gChar, gCharMtls, Matrix::CreateTranslation(0.0f, 0.0f, -20.0f), 0.0f);
-	DrawModel(gZelda, gZeldaMtls, Matrix::CreateTranslation(10.0f, 0.0f, -20.0f), 0.5f);
+	// Draw
+	DrawModel(gTree, gTreeMtls, Matrix::CreateTranslation(0, 0, -10));
+	DrawModel(gChar, gCharMtls, Matrix::CreateTranslation(0, 0, -20));
+	DrawModel(gZelda, gZeldaMtls, Matrix::CreateTranslation(10, 0, -20));
+
 
 #ifdef _DEBUG
 	UpdateImGUI();
@@ -206,8 +183,6 @@ void TutorialApp::OnRender()
 	m_pSwapChain->Present(1, 0);
 }
 
-//================================================================================================
-//////////////////////////////////////////////////////////////////////////////////////////////////
 //================================================================================================
 
 bool TutorialApp::InitScene()
@@ -294,17 +269,22 @@ bool TutorialApp::InitScene()
 
 		// 과제 명세: tree( diffuse, opacity ), character( diffuse, normal, specular, emissive ), zelda( diffuse, opacity )
 		// 경로는 네 프로젝트 구조에 맞게 조정해줘.
-		BuildAll(L"../Resource/tree/Tree.fbx", L"../Resource/Tree/", gTree, gTreeMtls);
-		BuildAll(L"../Resource/character/Character.fbx", L"../Resource/Character/", gChar, gCharMtls);
+		BuildAll(L"../Resource/Tree/Tree.fbx", L"../Resource/Tree/", gTree, gTreeMtls);
+		BuildAll(L"../Resource/Character/Character.fbx", L"../Resource/Character/", gChar, gCharMtls);
 		BuildAll(L"../Resource/Zelda/zeldaPosed001.fbx", L"../Resource/Zelda/", gZelda, gZeldaMtls);
 	}
 
 	// 4) 초기 프로젝션/월드 값(있다면 유지) ==============================================
 	// - m_Projection, m_World 등은 네 기존 코드 흐름(윈도우 리사이즈/카메라 세팅)에서 갱신되므로 여기선 건드리지 않아도 OK.
 
+	D3D11_RASTERIZER_DESC rd{};
+	rd.FillMode = D3D11_FILL_SOLID;
+	rd.CullMode = D3D11_CULL_NONE;         // ★ 컬링 끔
+	rd.FrontCounterClockwise = FALSE;      // 일단 기본
+	HR_T(m_pDevice->CreateRasterizerState(&rd, &m_pNoCullRS));
+
 	return true;
 }
-
 
 //================================================================================================
 
@@ -373,6 +353,7 @@ bool TutorialApp::InitD3D()
 
 	m_pDeviceContext->OMSetRenderTargets(1, &m_pRenderTargetView, m_pDepthStencilView);
 
+
 	D3D11_VIEWPORT viewport = {};
 	viewport.TopLeftX = 0;
 	viewport.TopLeftY = 0;
@@ -398,23 +379,11 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pMeshPS);
 	SAFE_RELEASE(m_pConstantBuffer);
 
-	// (StaticMeshMinimal가 내부에서 Release 하는 구조면) 이 한 줄이면 GPU 버퍼 정리됨
-	gTestMesh.reset();
-	SAFE_RELEASE(m_pUseCB);         // ★ 추가
+	SAFE_RELEASE(m_pUseCB);
 
-	SAFE_RELEASE(m_pVertexBuffer);
-	SAFE_RELEASE(m_pIndexBuffer);
-	SAFE_RELEASE(m_pInputLayout);
-	SAFE_RELEASE(m_pVertexShader);
-	SAFE_RELEASE(m_pPixelShader);
-	//SAFE_RELEASE(m_pPixelShaderSolid);	
-	//SAFE_RELEASE(m_pTextureRV);
 	SAFE_RELEASE(m_pSamplerLinear);
 	SAFE_RELEASE(m_pBlinnCB);
 
-	SAFE_RELEASE(m_pDiffuseSRV);
-	SAFE_RELEASE(m_pNormalSRV);
-	SAFE_RELEASE(m_pSpecularSRV);
 }
 
 void TutorialApp::UninitD3D()
@@ -426,17 +395,6 @@ void TutorialApp::UninitD3D()
 	SAFE_RELEASE(m_pDeviceContext);
 	SAFE_RELEASE(m_pSwapChain);
 	SAFE_RELEASE(m_pDevice);
-
-	//푸짐한 스카이박스 한상
-	SAFE_RELEASE(m_pSkySRV);
-	SAFE_RELEASE(m_pSkySampler);
-
-	SAFE_RELEASE(m_pSkyDSS);
-	SAFE_RELEASE(m_pSkyRS);
-
-	SAFE_RELEASE(m_pSkyVS);
-	SAFE_RELEASE(m_pSkyPS);
-	SAFE_RELEASE(m_pSkyIL);
 }
 
 //================================================================================================
@@ -556,15 +514,6 @@ void TutorialApp::UpdateImGUI()
 			if (ImGui::Button(u8"재질 초기화")) {
 				m_Ka = s_initKa; m_Ia = s_initIa; m_Ks = s_initKs; m_Shininess = s_initShin;
 			}
-		}
-
-		// 6) Textures preview (SRV가 있으면 썸네일)
-		if (ImGui::CollapsingHeader("Textures"))
-		{
-			const ImVec2 thumb(96, 96);
-			if (m_pDiffuseSRV) { ImGui::Image((ImTextureID)m_pDiffuseSRV, thumb);  ImGui::SameLine(); ImGui::Text("Albedo [t0]"); }
-			if (m_pNormalSRV) { ImGui::Image((ImTextureID)m_pNormalSRV, thumb);  ImGui::SameLine(); ImGui::Text("Normal [t1]"); }
-			if (m_pSpecularSRV) { ImGui::Image((ImTextureID)m_pSpecularSRV, thumb);  ImGui::SameLine(); ImGui::Text("Specular [t2]"); }
 		}
 	}
 

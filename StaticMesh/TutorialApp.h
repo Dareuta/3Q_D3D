@@ -36,29 +36,12 @@ public:
 	IDXGISwapChain* m_pSwapChain = nullptr;					// 스왑체인
 	ID3D11RenderTargetView* m_pRenderTargetView = nullptr;	// 렌더링 타겟뷰
 	//================================================================================================
+		
 
 
-	//================================================================================================	
-	// 렌더링 파이프라인에 적용하는  객체와 정보
-	ID3D11VertexShader* m_pVertexShader = nullptr;	// 정점 셰이더.
-	ID3D11PixelShader* m_pPixelShader = nullptr;	// 픽셀 셰이더.	
-
-	//ID3D11PixelShader* m_pPixelShaderSolid = nullptr;	// 픽셀 셰이더 라이트 표시용.	
-
-	ID3D11InputLayout* m_pInputLayout = nullptr;	// 입력 레이아웃.
-	ID3D11Buffer* m_pVertexBuffer = nullptr;		// 버텍스 버퍼.
-	UINT m_VertexBufferStride = 0;					// 버텍스 하나의 크기.
-	UINT m_VertexBufferOffset = 0;					// 버텍스 버퍼의 오프셋.
-	ID3D11Buffer* m_pIndexBuffer = nullptr;			// 버텍스 버퍼.
-	int m_nIndices = 0;								// 인덱스 개수.
 	//================================================================================================
 	// 추가한 뭐시기
-	ID3D11Buffer* m_pConstantBuffer = nullptr;			// 상수 버퍼.
-	XMMATRIX m_World;				// 월드좌표계 공간으로 변환을 위한 행렬.
-	XMMATRIX m_World_A;				// 월드좌표계 공간으로 변환을 위한 행렬.
-	XMMATRIX m_World_B;				// 월드좌표계 공간으로 변환을 위한 행렬.
-
-	XMMATRIX m_View;				// 뷰좌표계 공간으로 변환을 위한 행렬.
+	ID3D11Buffer* m_pConstantBuffer = nullptr;			// 상수 버퍼.	
 	XMMATRIX m_Projection;			// 단위장치좌표계( Normalized Device Coordinate) 공간으로 변환을 위한 행렬.
 
 	ID3D11Texture2D* m_pDepthStencil = nullptr;
@@ -68,31 +51,13 @@ public:
 	//================================================================================================
 	// 추가한 뭐시기2
 	//ID3D11ShaderResourceView* m_pTextureRV = nullptr;	// 텍스처 리소스 뷰.	
-	ID3D11SamplerState* m_pSamplerLinear = nullptr;
+	ID3D11SamplerState* m_pSamplerLinear = nullptr;	
 
-	//================================================================================================
-	// 스카이박스에 사용하는거 따로 한세트 추가함
-
-	ID3D11ShaderResourceView* m_pSkySRV = nullptr;  // 스카이박스
-	ID3D11SamplerState* m_pSkySampler = nullptr;  // 스카이용
-
-	ID3D11DepthStencilState* m_pSkyDSS = nullptr;  
-	ID3D11RasterizerState* m_pSkyRS = nullptr; // 이거, 스카이 박스는 감기는 방향 반대로 해줘야해서 필요함 - 원래는 기본값 사용했던거임
-
-	ID3D11VertexShader* m_pSkyVS = nullptr;
-	ID3D11PixelShader* m_pSkyPS = nullptr;
-	ID3D11InputLayout* m_pSkyIL = nullptr;
 
 	//================================================================================================
 	// 블링퐁퐁
 	ID3D11Buffer* m_pBlinnCB = nullptr;
-
-	// 노말맵맵
-	ID3D11ShaderResourceView* m_pDiffuseSRV = nullptr;
-	ID3D11ShaderResourceView* m_pNormalSRV = nullptr;
-	ID3D11ShaderResourceView* m_pSpecularSRV = nullptr;
-
-
+				
 	bool OnInitialize() override;
 	void OnUninitialize() override;
 	void OnUpdate() override;
@@ -142,5 +107,6 @@ private:
 	ID3D11Buffer* m_pUseCB = nullptr;
 	StaticMesh gTree, gChar, gZelda;
 	std::vector<MaterialGPU> gTreeMtls, gCharMtls, gZeldaMtls;
+	ID3D11RasterizerState* m_pNoCullRS = nullptr;
 };
 
