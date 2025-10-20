@@ -56,6 +56,24 @@ cbuffer BP : register(b1)
     float4 I_ambient; // (Ia.r, Ia.g, Ia.b, 0)
 }
 
+
+//10.21 추가
+//------------------------------
+cbuffer USE : register(b2)
+{
+    uint useDiffuse;
+    uint useNormal;
+    uint useSpecular;
+    uint useEmissive;
+    
+    uint useOpacity;
+    float alphaCut; // 알파 임계값
+    float2 _pad; // 정렬용 16바이트
+}
+
+//------------------------------
+
+
 //===========================================
 
 // t0, t1, t2 순서대로 보내서 매칭시키는거임
@@ -79,6 +97,11 @@ cbuffer BP : register(b1)
 Texture2D txDiffuse : register(t0); // 이게 원본(sRGB)
 Texture2D txNormal : register(t1); // 여기에 노말맵(선형)
 Texture2D txSpecular : register(t2); // 여기에 스펙큘러(선형)
+
+//------------------------------
+Texture2D txEmissive : register(t3); // 에메시브, 오퍼시티 텍스처 슬롯 추가
+Texture2D txOpacity : register(t4);
+//------------------------------
 
 //===========================================
 /*
@@ -141,5 +164,52 @@ struct PS_INPUT
 };
 
 //===========================================
+//------------------------------
+// 노말맵 왜곡/뒤집힘 방지하는 탄젠트 재직교화 + TBN 적용 함수
+// PS에서 호출할 예정
+// 그거구나, N이랑 T로, BT구하는거
+
+inline float3 OrthonormalizeTangent(float3 N, float3 T)
+{
+    //그림슈미츠였나 그거임
+    T = normalize(T - N * dot(T, N));
+    float3 B = normalize(cross(N, T)); // N T 외적하면, B나옴
+    T = normalize(cross(B, N));
+    return T;
+}
+
+// flipGreen = 1 일때, G채널 반전하는 용도의 함수(OpenGL계열 노말맵 대응)
+
+inline float3 ApplyNormalMapTS(float3 Nw, float3 Tw, float sign, float2 uv, int flipGreen /*=0*/)
+{
+    float3 Bw = normalize(cross(Nw, Tw)) * sign;
+    Tw = normalize(cross(Bw, Nw)); // 재직교화라고 하는데, 굳이라는 느낌이 조금 있긴 함
+    
+    float3x3 TBN = float3x3(Tw, Bw, Nw);
+    float3 nTS = txNormal.Sample(samLinear, uv).xyz * 2.0f - 1.0f; // 느낌상 보면, -1~1 값을 정규화 시킨거임    
+    if (flipGreen)
+        nTS.g = -nTS.g; // UVG중, G를 뒤집은거임
+    
+    return normalize(mul(nTS, TBN));
+    
+}
+
+// 알파 테스트 헬퍼 함수라는데, 일단 추가해봄
+// 중간에 투명한 부분 알파컷에서 쓴다고 하긴 함
+
+inline void AlphaClip(float2 uv)
+{
+    if (useOpacity != 0)
+    {
+        float a = txOpacity.Sample(samLinear, uv).r; // 관례상? 단일 텍스처는 r값을 가져와서 쓴다고함
+        clip(a - alphaCut); // a < alphaCut이면 픽셀 버림
+    }
+}
+
+
+
+//------------------------------
+
+
 
 #endif // 여기까지가 헤더라는거임(인클루드 가드)
