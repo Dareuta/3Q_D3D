@@ -78,38 +78,21 @@ void TutorialApp::OnUpdate()
 	float t = GameTimer::m_Instance->TotalTime();
 
 	XMMATRIX mSpin = XMMatrixRotationY(t * spinSpeed);
-
 	XMMATRIX mScaleA = XMMatrixScaling(cubeScale.x, cubeScale.y, cubeScale.z);
-	XMMATRIX mScaleB = XMMatrixScaling(cubeScale.x * 0.6f, cubeScale.y * 0.6f, cubeScale.z * 0.6f);
-	XMMATRIX mScaleC = XMMatrixScaling(cubeScale.x * 0.3f, cubeScale.y * 0.3f, cubeScale.z * 0.3f);
-
 	XMMATRIX mTranslateA = XMMatrixTranslation(cubeTransformA.x, cubeTransformA.y, cubeTransformA.z);
-	XMMATRIX mTranslateB = XMMatrixTranslation(cubeTransformB.x, cubeTransformB.y, cubeTransformB.z);
-	XMMATRIX mTranslateC = XMMatrixTranslation(cubeTransformC.x, cubeTransformC.y, cubeTransformC.z);
 
-	//오브젝트
-	XMMATRIX tmpA = mSpin * mTranslateA;
-	m_World = mScaleA * tmpA;
+	m_World = mScaleA * mSpin * mTranslateA; // SRT
 }
 
 //================================================================================================
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//================================================================================================
+
 void TutorialApp::OnRender()
 {
 	m_pDeviceContext->RSSetState(m_pNoCullRS);
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
 	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
-
-	/*
-	* float aspect = (float)m_ClientWidth / (float)m_ClientHeight; 
-	m_Projection = Matrix::CreatePerspectiveFieldOfView( 
-		DirectX::XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
-		해당 코드 사용했을때, 마우스 반전되고, 앞 뒤 방향이 뒤틀렸음
-		이유는 뭘까
-		
-		CreatePerspectiveFieldOfView << 오른손 좌표계임
-		그런데, 내 파이프라인 구성은 왼손 좌표계인거임
-		그래서 오류난거임 허허
-	*/
 
 	if (m_FovDegree < 10.0f)      m_FovDegree = 10.0f;
 	else if (m_FovDegree > 120.0f) m_FovDegree = 120.0f;
@@ -123,7 +106,6 @@ void TutorialApp::OnRender()
 
 	float aspect = m_ClientWidth / (float)m_ClientHeight;
 	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
-
 
 	// ===== 1) 파이프라인 셋업 =====
 	m_pDeviceContext->IASetInputLayout(m_pMeshIL);
@@ -277,6 +259,8 @@ void TutorialApp::OnRender()
 }
 
 //================================================================================================
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//================================================================================================
 
 bool TutorialApp::InitScene()
 {
@@ -378,87 +362,6 @@ bool TutorialApp::InitScene()
 	rd.FrontCounterClockwise = FALSE;      // 일단 기본
 	HR_T(m_pDevice->CreateRasterizerState(&rd, &m_pNoCullRS));
 
-	return true;
-}
-
-//================================================================================================
-
-bool TutorialApp::InitD3D()
-{
-	HRESULT hr = 0;
-
-	DXGI_SWAP_CHAIN_DESC swapDesc = {};
-	swapDesc.BufferCount = 1;
-	swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	swapDesc.OutputWindow = m_hWnd;
-	swapDesc.Windowed = true;
-	swapDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	swapDesc.BufferDesc.Width = m_ClientWidth;
-	swapDesc.BufferDesc.Height = m_ClientHeight;
-	swapDesc.BufferDesc.RefreshRate.Numerator = 60;
-	swapDesc.BufferDesc.RefreshRate.Denominator = 1;
-	swapDesc.SampleDesc.Count = 1;
-	swapDesc.SampleDesc.Quality = 0;
-
-	UINT creationFlags = 0;
-#ifdef _DEBUG
-	creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
-#endif
-	HR_T(D3D11CreateDeviceAndSwapChain(
-		NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
-		creationFlags, NULL, NULL, D3D11_SDK_VERSION,
-		&swapDesc,
-		&m_pSwapChain,
-		&m_pDevice, NULL,
-		&m_pDeviceContext));
-
-	ID3D11Texture2D* pBackBufferTexture = nullptr;
-
-	HR_T(m_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&pBackBufferTexture));
-
-	HR_T(m_pDevice->CreateRenderTargetView(pBackBufferTexture, NULL, &m_pRenderTargetView));
-	SAFE_RELEASE(pBackBufferTexture);
-
-	//==============================================================================================
-
-	D3D11_TEXTURE2D_DESC dsDesc = {};
-	dsDesc.Width = m_ClientWidth;
-	dsDesc.Height = m_ClientHeight;
-	dsDesc.MipLevels = 1;
-	dsDesc.ArraySize = 1;
-	dsDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; // 흔한 조합
-	dsDesc.SampleDesc.Count = 1;  // 스왑체인과 동일하게
-	dsDesc.SampleDesc.Quality = 0;
-	dsDesc.Usage = D3D11_USAGE_DEFAULT;
-	dsDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-
-	HR_T(m_pDevice->CreateTexture2D(&dsDesc, nullptr, &m_pDepthStencil));
-	HR_T(m_pDevice->CreateDepthStencilView(m_pDepthStencil, nullptr, &m_pDepthStencilView));
-
-	D3D11_DEPTH_STENCIL_DESC dss = {};
-	dss.DepthEnable = TRUE;
-	dss.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
-	dss.DepthFunc = D3D11_COMPARISON_LESS_EQUAL; // 스카이박스 쓸거면 LEQUAL이 편함. 기본은 LESS
-	dss.StencilEnable = FALSE;
-	HR_T(m_pDevice->CreateDepthStencilState(&dss, &m_pDepthStencilState));
-	m_pDeviceContext->OMSetDepthStencilState(m_pDepthStencilState, 0);
-
-
-	//==============================================================================================
-
-	m_pDeviceContext->OMSetRenderTargets(1, &m_pRenderTargetView, m_pDepthStencilView);
-
-
-	D3D11_VIEWPORT viewport = {};
-	viewport.TopLeftX = 0;
-	viewport.TopLeftY = 0;
-	viewport.Width = (float)m_ClientWidth;
-	viewport.Height = (float)m_ClientHeight;
-	viewport.MinDepth = 0.0f;
-	viewport.MaxDepth = 1.0f;
-
-	m_pDeviceContext->RSSetViewports(1, &viewport);
-
 	//======================  SKYBOX: Shaders / IL  ======================
 	{
 		ID3D10Blob* vsb = nullptr;
@@ -542,15 +445,95 @@ bool TutorialApp::InitD3D()
 		HR_T(m_pDevice->CreateRasterizerState(&rs, &m_pSkyRS));
 
 	}
+
 	return true;
 }
 
 //================================================================================================
-// Uninit
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//================================================================================================
+
+bool TutorialApp::InitD3D()
+{
+	HRESULT hr = 0;
+
+	DXGI_SWAP_CHAIN_DESC swapDesc = {};
+	swapDesc.BufferCount = 1;
+	swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	swapDesc.OutputWindow = m_hWnd;
+	swapDesc.Windowed = true;
+	swapDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	swapDesc.BufferDesc.Width = m_ClientWidth;
+	swapDesc.BufferDesc.Height = m_ClientHeight;
+	swapDesc.BufferDesc.RefreshRate.Numerator = 60;
+	swapDesc.BufferDesc.RefreshRate.Denominator = 1;
+	swapDesc.SampleDesc.Count = 1;
+	swapDesc.SampleDesc.Quality = 0;
+
+	UINT creationFlags = 0;
+#ifdef _DEBUG
+	creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
+	HR_T(D3D11CreateDeviceAndSwapChain(
+		NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
+		creationFlags, NULL, NULL, D3D11_SDK_VERSION,
+		&swapDesc,
+		&m_pSwapChain,
+		&m_pDevice, NULL,
+		&m_pDeviceContext));
+
+	ID3D11Texture2D* pBackBufferTexture = nullptr;
+
+	HR_T(m_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&pBackBufferTexture));
+
+	HR_T(m_pDevice->CreateRenderTargetView(pBackBufferTexture, NULL, &m_pRenderTargetView));
+	SAFE_RELEASE(pBackBufferTexture);
+
+	//==============================================================================================
+
+	D3D11_TEXTURE2D_DESC dsDesc = {};
+	dsDesc.Width = m_ClientWidth;
+	dsDesc.Height = m_ClientHeight;
+	dsDesc.MipLevels = 1;
+	dsDesc.ArraySize = 1;
+	dsDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; // 흔한 조합
+	dsDesc.SampleDesc.Count = 1;  // 스왑체인과 동일하게
+	dsDesc.SampleDesc.Quality = 0;
+	dsDesc.Usage = D3D11_USAGE_DEFAULT;
+	dsDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+
+	HR_T(m_pDevice->CreateTexture2D(&dsDesc, nullptr, &m_pDepthStencil));
+	HR_T(m_pDevice->CreateDepthStencilView(m_pDepthStencil, nullptr, &m_pDepthStencilView));
+
+	D3D11_DEPTH_STENCIL_DESC dss = {};
+	dss.DepthEnable = TRUE;
+	dss.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+	dss.DepthFunc = D3D11_COMPARISON_LESS_EQUAL; // 스카이박스 쓸거면 LEQUAL이 편함. 기본은 LESS
+	dss.StencilEnable = FALSE;
+	HR_T(m_pDevice->CreateDepthStencilState(&dss, &m_pDepthStencilState));
+	m_pDeviceContext->OMSetDepthStencilState(m_pDepthStencilState, 0);
+
+	//==============================================================================================
+
+	m_pDeviceContext->OMSetRenderTargets(1, &m_pRenderTargetView, m_pDepthStencilView);
+
+	D3D11_VIEWPORT viewport = {};
+	viewport.TopLeftX = 0;
+	viewport.TopLeftY = 0;
+	viewport.Width = (float)m_ClientWidth;
+	viewport.Height = (float)m_ClientHeight;
+	viewport.MinDepth = 0.0f;
+	viewport.MaxDepth = 1.0f;
+
+	m_pDeviceContext->RSSetViewports(1, &viewport);
+
+	return true;
+}
+
+//================================================================================================
 
 void TutorialApp::UninitScene()
 {
-
 	// FBX 전용 파이프라인 자원
 	SAFE_RELEASE(m_pMeshIL);
 	SAFE_RELEASE(m_pMeshVS);
@@ -571,7 +554,6 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pSkySampler);
 	SAFE_RELEASE(m_pSkyDSS);
 	SAFE_RELEASE(m_pSkyRS);
-
 }
 
 void TutorialApp::UninitD3D()
@@ -586,7 +568,6 @@ void TutorialApp::UninitD3D()
 }
 
 //================================================================================================
-// 임꾸이
 
 bool TutorialApp::InitImGUI()
 {
@@ -610,6 +591,8 @@ void TutorialApp::UninitImGUI()
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
 }
+
+//================================================================================================
 
 void TutorialApp::UpdateImGUI()
 {
