@@ -21,10 +21,9 @@ static unsigned MakeFlags(bool flipUV, bool leftHanded) {
 
 static std::wstring Widen(const aiString& s) {
     std::string a = s.C_Str();
-    return std::wstring(a.begin(), a.end()); // (수업 과제 가정: ASCII 파일명)
+    return std::wstring(a.begin(), a.end()); 
 }
 
-// 파일명만 추출해서 보관 (과제 지침)
 static std::wstring FileOnly(const std::wstring& p) {
     return path(p).filename().wstring();
 }

@@ -7,6 +7,8 @@
 #include "AssimpImporterEx.h"
 
 #include <d3dcompiler.h>
+#include <Directxtk/DDSTextureLoader.h>  // CreateDDSTextureFromFile
+
 
 #pragma comment (lib, "d3d11.lib")
 #pragma comment(lib,"d3dcompiler.lib")
@@ -73,25 +75,56 @@ void TutorialApp::OnUninitialize()
 
 void TutorialApp::OnUpdate()
 {
+	float t = GameTimer::m_Instance->TotalTime();
 
+	XMMATRIX mSpin = XMMatrixRotationY(t * spinSpeed);
+
+	XMMATRIX mScaleA = XMMatrixScaling(cubeScale.x, cubeScale.y, cubeScale.z);
+	XMMATRIX mScaleB = XMMatrixScaling(cubeScale.x * 0.6f, cubeScale.y * 0.6f, cubeScale.z * 0.6f);
+	XMMATRIX mScaleC = XMMatrixScaling(cubeScale.x * 0.3f, cubeScale.y * 0.3f, cubeScale.z * 0.3f);
+
+	XMMATRIX mTranslateA = XMMatrixTranslation(cubeTransformA.x, cubeTransformA.y, cubeTransformA.z);
+	XMMATRIX mTranslateB = XMMatrixTranslation(cubeTransformB.x, cubeTransformB.y, cubeTransformB.z);
+	XMMATRIX mTranslateC = XMMatrixTranslation(cubeTransformC.x, cubeTransformC.y, cubeTransformC.z);
+
+	//오브젝트
+	XMMATRIX tmpA = mSpin * mTranslateA;
+	m_World = mScaleA * tmpA;
 }
 
 //================================================================================================
 void TutorialApp::OnRender()
 {
 	m_pDeviceContext->RSSetState(m_pNoCullRS);
-
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
+	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
-	m_pDeviceContext->ClearDepthStencilView(
-		m_pDepthStencilView,
-		D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL,
-		1.0f, 0);
-
-	float aspect = (float)m_ClientWidth / (float)m_ClientHeight;
-	m_Projection = Matrix::CreatePerspectiveFieldOfView(
-
+	/*
+	* float aspect = (float)m_ClientWidth / (float)m_ClientHeight; 
+	m_Projection = Matrix::CreatePerspectiveFieldOfView( 
 		DirectX::XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
+		해당 코드 사용했을때, 마우스 반전되고, 앞 뒤 방향이 뒤틀렸음
+		이유는 뭘까
+		
+		CreatePerspectiveFieldOfView << 오른손 좌표계임
+		그런데, 내 파이프라인 구성은 왼손 좌표계인거임
+		그래서 오류난거임 허허
+	*/
+
+	if (m_FovDegree < 10.0f)      m_FovDegree = 10.0f;
+	else if (m_FovDegree > 120.0f) m_FovDegree = 120.0f;
+
+	// 최소값 보장
+	if (m_Near < 0.0001f) m_Near = 0.0001f;
+
+	// Near보다 약간 더 크게
+	float minFar = m_Near + 0.001f;
+	if (m_Far < minFar) m_Far = minFar;
+
+	float aspect = m_ClientWidth / (float)m_ClientHeight;
+	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
+
+
 	// ===== 1) 파이프라인 셋업 =====
 	m_pDeviceContext->IASetInputLayout(m_pMeshIL);
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -100,22 +133,23 @@ void TutorialApp::OnRender()
 	if (m_pSamplerLinear) m_pDeviceContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
 
 	// ===== 2) 공통 CB0(뷰/프로젝션/라이트) + b1(카메라/재질) =====
-	Matrix view; m_Camera.GetViewMatrix(view);
-
-	// 간단한 방향광(헤더 멤버: m_LightYaw, m_LightPitch, m_LightColor, m_LightIntensity)
-	Vector3 L(
-		cosf(m_LightYaw) * cosf(m_LightPitch),
-		sinf(m_LightPitch),
-		sinf(m_LightYaw) * cosf(m_LightPitch)
-	);
-
+	Matrix view;
 	ConstantBuffer cb{};
-	cb.mWorld = XMMatrixTranspose(Matrix::Identity);        // 개별 드로우에서 바꿔치기
+	m_Camera.GetViewMatrix(view);
 	cb.mView = XMMatrixTranspose(view);
 	cb.mProjection = XMMatrixTranspose(m_Projection);
-	cb.mWorldInvTranspose = XMMatrixTranspose(Matrix::Identity.Invert());
-	cb.vLightDir = Vector4(L.x, L.y, L.z, 0.0f);
-	cb.vLightColor = Vector4(m_LightColor.x, m_LightColor.y, m_LightColor.z, 0.0f) * m_LightIntensity;
+
+	XMMATRIX R = XMMatrixRotationRollPitchYaw(m_LightPitch, m_LightYaw, 0.0f);
+	XMVECTOR base = XMVector3Normalize(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f));
+	XMVECTOR L = XMVector3Normalize(XMVector3TransformNormal(base, R));
+	Vector3 dir = { XMVectorGetX(L), XMVectorGetY(L), XMVectorGetZ(L) };
+
+	auto world = m_World;
+	cb.mWorld = XMMatrixTranspose(Matrix::Identity);        // 개별 드로우에서 바꿔치기
+
+	cb.mWorldInvTranspose = XMMatrixInverse(nullptr, Matrix::Identity);
+	cb.vLightDir = Vector4(dir.x, dir.y, dir.z, 0.0f);
+	cb.vLightColor = Vector4(m_LightColor.x * m_LightIntensity, m_LightColor.y * m_LightIntensity, m_LightColor.z * m_LightIntensity, 1.0f);
 
 	m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
 	m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
@@ -176,6 +210,63 @@ void TutorialApp::OnRender()
 	DrawModel(gTree, gTreeMtls, Matrix::CreateTranslation(0, 0, -10));
 	DrawModel(gChar, gCharMtls, Matrix::CreateTranslation(0, 0, -20));
 	DrawModel(gZelda, gZeldaMtls, Matrix::CreateTranslation(10, 0, -20));
+
+	// ====== SKYBOX PASS (draw last) ======
+	{
+		// RS/OM 상태 백업
+		ID3D11RasterizerState* oldRS = nullptr;
+		m_pDeviceContext->RSGetState(&oldRS);
+		ID3D11DepthStencilState* oldDSS = nullptr; UINT oldStencilRef = 0;
+		m_pDeviceContext->OMGetDepthStencilState(&oldDSS, &oldStencilRef);
+
+		// 파이프라인 셋업		
+		m_pDeviceContext->RSSetState(m_pSkyRS);
+		//m_pDeviceContext->RSSetState(nullptr);
+		m_pDeviceContext->OMSetDepthStencilState(m_pSkyDSS, 0);
+
+		m_pDeviceContext->IASetInputLayout(m_pSkyIL);
+		m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+		m_pDeviceContext->VSSetShader(m_pSkyVS, nullptr, 0);
+		m_pDeviceContext->PSSetShader(m_pSkyPS, nullptr, 0);
+
+		// CB0 업데이트: view에서 translation 제거
+		Matrix view; m_Camera.GetViewMatrix(view);
+		Matrix viewRot = view;
+		viewRot._41 = viewRot._42 = viewRot._43 = 0.0f; // SimpleMath Matrix는 행렬 멤버 직접 접근 가능
+
+		ConstantBuffer skyCB = {};
+		skyCB.mWorld = XMMatrixTranspose(Matrix::Identity);
+		skyCB.mView = XMMatrixTranspose(viewRot);
+		skyCB.mProjection = XMMatrixTranspose(m_Projection);
+		skyCB.mWorldInvTranspose = XMMatrixTranspose(Matrix::Identity); // 안 씀
+		skyCB.vLightDir = Vector4(0, 0, 0, 0);
+		skyCB.vLightColor = Vector4(0, 0, 0, 0);
+		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &skyCB, 0, 0);
+		m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+
+		// 텍스처 바인딩 (Sky_PS.hlsl: TextureCube t0, Sampler s0 가정)
+		m_pDeviceContext->PSSetShaderResources(0, 1, &m_pSkySRV);
+		m_pDeviceContext->PSSetSamplers(0, 1, &m_pSkySampler);
+
+		// VB/IB 바인딩 후 드로우
+		UINT stride = sizeof(DirectX::XMFLOAT3);
+		UINT offset = 0;
+		ID3D11Buffer* vbs[] = { m_pSkyVB };
+		m_pDeviceContext->IASetVertexBuffers(0, 1, vbs, &stride, &offset);
+		m_pDeviceContext->IASetIndexBuffer(m_pSkyIB, DXGI_FORMAT_R16_UINT, 0);
+		m_pDeviceContext->DrawIndexed(36, 0, 0);
+
+		// SRV 언바인드 (디버그 경고 예방)
+		ID3D11ShaderResourceView* nullSRV[1] = { nullptr };
+		m_pDeviceContext->PSSetShaderResources(0, 1, nullSRV);
+
+		// 상태 복원
+		m_pDeviceContext->RSSetState(oldRS);
+		m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldStencilRef);
+		SAFE_RELEASE(oldRS);
+		SAFE_RELEASE(oldDSS);
+	}
 
 
 #ifdef _DEBUG
@@ -368,6 +459,89 @@ bool TutorialApp::InitD3D()
 
 	m_pDeviceContext->RSSetViewports(1, &viewport);
 
+	//======================  SKYBOX: Shaders / IL  ======================
+	{
+		ID3D10Blob* vsb = nullptr;
+		HR_T(CompileShaderFromFile(L"../Resource/Sky_VS.hlsl", "main", "vs_5_0", &vsb));
+		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pSkyVS));
+
+		// Sky VS는 position-only( float3 POSITION ) 기준
+		D3D11_INPUT_ELEMENT_DESC il[] = {
+			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		};
+		HR_T(m_pDevice->CreateInputLayout(il, _countof(il), vsb->GetBufferPointer(), vsb->GetBufferSize(), &m_pSkyIL));
+		SAFE_RELEASE(vsb);
+
+		ID3D10Blob* psb = nullptr;
+		HR_T(CompileShaderFromFile(L"../Resource/Sky_PS.hlsl", "main", "ps_5_0", &psb));
+		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pSkyPS));
+		SAFE_RELEASE(psb);
+	}
+
+	//======================  SKYBOX: Geometry (unit cube)  ======================
+	{
+		struct SkyV { DirectX::XMFLOAT3 pos; };
+		// 단위 큐브(센터 원점). 내부에서 보도록 FRONT 컬링 예정
+		const SkyV v[] = {
+			{{-1,-1,-1}}, {{-1,+1,-1}}, {{+1,+1,-1}}, {{+1,-1,-1}}, // back (z-)
+			{{-1,-1,+1}}, {{-1,+1,+1}}, {{+1,+1,+1}}, {{+1,-1,+1}}, // front (z+)
+		};
+		const uint16_t idx[] = {
+			// 각 면 CCW (밖을 향함). 우리는 Cull FRONT라 내부면이 렌더됨.
+			0,1,2, 0,2,3, // back
+			4,6,5, 4,7,6, // front
+			4,5,1, 4,1,0, // left
+			3,2,6, 3,6,7, // right
+			1,5,6, 1,6,2, // top
+			4,0,3, 4,3,7  // bottom
+		};
+
+		// VB
+		D3D11_BUFFER_DESC vbDesc{}; vbDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+		vbDesc.ByteWidth = UINT(sizeof(v));
+		vbDesc.Usage = D3D11_USAGE_DEFAULT;
+		D3D11_SUBRESOURCE_DATA vinit{}; vinit.pSysMem = v;
+		HR_T(m_pDevice->CreateBuffer(&vbDesc, &vinit, &m_pSkyVB));
+
+		// IB
+		D3D11_BUFFER_DESC ibDesc{}; ibDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+		ibDesc.ByteWidth = UINT(sizeof(idx));
+		ibDesc.Usage = D3D11_USAGE_DEFAULT;
+		D3D11_SUBRESOURCE_DATA iinit{}; iinit.pSysMem = idx;
+		HR_T(m_pDevice->CreateBuffer(&ibDesc, &iinit, &m_pSkyIB));
+	}
+
+	//======================  SKYBOX: Texture / Sampler  ======================
+	{
+		// Hanako.dds 경로는 네 프로젝트 구조에 맞게 조정
+		HR_T(CreateDDSTextureFromFile(m_pDevice,
+			L"../Resource/Hanako.dds", nullptr, &m_pSkySRV));
+
+		D3D11_SAMPLER_DESC sd{}; // clamp가 세렝게티
+		sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+		sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+		sd.MaxLOD = D3D11_FLOAT32_MAX;
+		HR_T(m_pDevice->CreateSamplerState(&sd, &m_pSkySampler));
+	}
+
+	//======================  SKYBOX: Depth/Raster states  ======================
+	{
+		// depth write 끄고, LEQUAL (네가 기본 dss를 LEQUAL로 써도, sky는 write=ZERO가 핵심)
+		D3D11_DEPTH_STENCIL_DESC sd{};
+		sd.DepthEnable = TRUE;
+		sd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+		sd.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+		sd.StencilEnable = FALSE;
+		HR_T(m_pDevice->CreateDepthStencilState(&sd, &m_pSkyDSS));
+
+		// 내부 면 렌더링: FRONT 컬링
+		D3D11_RASTERIZER_DESC rs{};
+		rs.FillMode = D3D11_FILL_SOLID;
+		rs.CullMode = D3D11_CULL_FRONT;
+		rs.FrontCounterClockwise = FALSE;
+		HR_T(m_pDevice->CreateRasterizerState(&rs, &m_pSkyRS));
+
+	}
 	return true;
 }
 
@@ -387,6 +561,16 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pNoCullRS);
 	SAFE_RELEASE(m_pSamplerLinear);
 	SAFE_RELEASE(m_pBlinnCB);
+
+	SAFE_RELEASE(m_pSkyVS);
+	SAFE_RELEASE(m_pSkyPS);
+	SAFE_RELEASE(m_pSkyIL);
+	SAFE_RELEASE(m_pSkyVB);
+	SAFE_RELEASE(m_pSkyIB);
+	SAFE_RELEASE(m_pSkySRV);
+	SAFE_RELEASE(m_pSkySampler);
+	SAFE_RELEASE(m_pSkyDSS);
+	SAFE_RELEASE(m_pSkyRS);
 
 }
 

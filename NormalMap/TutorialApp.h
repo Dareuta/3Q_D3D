@@ -114,7 +114,7 @@ private:
 
 	float m_FovDegree = 60.0f;    // degrees
 	float m_Near = 0.1f;
-	float m_Far = 100.0f;
+	float m_Far = 1000.0f;
 
 	float m_LightYaw = XMConvertToRadians(45.0f);         // -π ~ +π (Y축 기준으로 회전) << 좌우로 회전
 	float m_LightPitch = XMConvertToRadians(-20.0f);       // -π/2 ~ +π/2 (하늘/땅 제한용) ( X축 기준으로 회전) << 위 아래로 끄덕

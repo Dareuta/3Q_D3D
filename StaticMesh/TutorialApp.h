@@ -39,9 +39,21 @@ public:
 	ID3D11DepthStencilState* m_pDepthStencilState = nullptr;
 	ID3D11SamplerState* m_pSamplerLinear = nullptr;		
 	ID3D11Buffer* m_pBlinnCB = nullptr;
-
+	//================================================================================================	
+	// Skybox resources
+	ID3D11VertexShader* m_pSkyVS = nullptr;
+	ID3D11PixelShader* m_pSkyPS = nullptr;
+	ID3D11InputLayout* m_pSkyIL = nullptr;
+	ID3D11Buffer* m_pSkyVB = nullptr;
+	ID3D11Buffer* m_pSkyIB = nullptr;
+	ID3D11ShaderResourceView* m_pSkySRV = nullptr; // Hanako.dds
+	ID3D11SamplerState* m_pSkySampler = nullptr;
+	ID3D11DepthStencilState* m_pSkyDSS = nullptr; // Depth write OFF, LEQUAL
+	ID3D11RasterizerState* m_pSkyRS = nullptr; // Cull FRONT (내부가 보이게)
 	//================================================================================================
-				
+			
+	XMMATRIX m_World;
+
 	bool OnInitialize() override;
 	void OnUninitialize() override;
 	void OnUpdate() override;
