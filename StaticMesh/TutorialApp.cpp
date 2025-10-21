@@ -224,6 +224,7 @@ void TutorialApp::OnRender()
 		skyCB.mWorldInvTranspose = XMMatrixTranspose(Matrix::Identity); // 안 씀
 		skyCB.vLightDir = Vector4(0, 0, 0, 0);
 		skyCB.vLightColor = Vector4(0, 0, 0, 0);
+
 		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &skyCB, 0, 0);
 		m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 
