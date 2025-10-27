@@ -5,41 +5,53 @@
 #endif
 
 #ifndef SWAPCHAIN_SRGB
-#define SWAPCHAIN_SRGB 1   // sRGB 스왑체인 쓰면 1
+#define SWAPCHAIN_SRGB 1
+#endif
+
+#ifndef OPACITY_MAP_IS_TRANSPARENCY // 1이면 흰=투명(=뒤집기 필요)
+#define OPACITY_MAP_IS_TRANSPARENCY 0
 #endif
 
 float4 main(PS_INPUT input) : SV_Target
 {
-    // 0) 알파값 결정 (opacity 텍스처 있으면 사용)
+    // ---- 0) 알파 결정 ----
     float a = 1.0f;
     if (useOpacity != 0)
     {
-        a = txOpacity.Sample(samLinear, input.Tex).r;
-    }
+        a = txOpacity.Sample(samLinear, input.Tex).a;
 
-    // 1) 컷아웃 패스면 clip, 블렌드 패스면 alphaCut=-1이라 통과됨
-    //    (CPU에서: cutoutPass -> alphaCut=0.5f, blendPass -> alphaCut=-1.0f)
-    AlphaClip(input.Tex);
+    #if OPACITY_MAP_IS_TRANSPARENCY
+        a = 1.0f - a; // 흰=투명 맵 뒤집기
+    #endif
 
-    // 2) 셰이딩(네 코드 유지)
-    float3 albedo = (useDiffuse != 0) ?
-        txDiffuse.Sample(samLinear, input.Tex).rgb : float3(1, 1, 1);
-    float specMask = (useSpecular != 0) ?
-        txSpecular.Sample(samLinear, input.Tex).r : 1.0f;
-    float3 emissive = (useEmissive != 0) ?
-        txEmissive.Sample(samLinear, input.Tex).rgb : float3(0, 0, 0);
+        // 완전 투명 취급(희끗한 샘플 제거)
+        const float MIN_ALPHA = 1e-3;   // 필요시 1e-2 ~ 5e-3 사이로 조정
+        if (a <= MIN_ALPHA) clip(-1);
+
+        // 컷아웃 패스(αcut >= 0)일 때만 자르고, 통과 픽셀은 불투명으로
+        if (alphaCut >= 0.0f) {
+            clip(a - alphaCut);
+            a = 1.0f;
+        }
+    }    
+
+    // ---- 1) 셰이딩 ----
+    float3 albedo   = (useDiffuse  != 0) ? txDiffuse .Sample(samLinear, input.Tex).rgb : float3(1,1,1);
+    float  specMask = (useSpecular != 0) ? txSpecular.Sample(samLinear, input.Tex).r   : 1.0f;
+    float3 emissive = (useEmissive != 0) ? txEmissive.Sample(samLinear, input.Tex).rgb : float3(0,0,0);
 
     float3 Nw_base = normalize(input.NormalW);
-    float3 Tw = OrthonormalizeTangent(Nw_base, input.TangentW.xyz);
-    float3 Nw = (useNormal != 0) ?
-        ApplyNormalMapTS(Nw_base, Tw, input.TangentW.w, input.Tex, NORMALMAP_FLIP_GREEN) : Nw_base;
+    float3 Tw      = OrthonormalizeTangent(Nw_base, input.TangentW.xyz);
+    float3 Nw      = (useNormal != 0)
+        ? ApplyNormalMapTS(Nw_base, Tw, input.TangentW.w, input.Tex, NORMALMAP_FLIP_GREEN)
+        : Nw_base;
 
     float3 L = normalize(-vLightDir.xyz);
     float3 V = normalize(EyePosW.xyz - input.WorldPos);
     float3 H = normalize(L + V);
 
-    float ks   = kSAlpha.x;
-    float shin = max(1.0f, kSAlpha.y);
+    float  ks   = kSAlpha.x;
+    float  shin = max(1.0f, kSAlpha.y);
 
     float  NdotL = saturate(dot(Nw, L));
     float3 diff  = albedo * NdotL;

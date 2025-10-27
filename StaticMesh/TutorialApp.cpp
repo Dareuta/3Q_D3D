@@ -272,9 +272,9 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
 
 		// 트렁크(불투명)만
-		DrawOpaqueOnly(gTree, gTreeMtls, Matrix::CreateTranslation(0, 0, -10));
-		// DrawOpaqueOnly(gChar,  gCharMtls,  Matrix::CreateTranslation(0,0,-20));
-		// DrawOpaqueOnly(gZelda, gZeldaMtls, Matrix::CreateTranslation(10,0,-20));
+		DrawOpaqueOnly(gTree, gTreeMtls, Matrix::CreateTranslation(-200, 0, -10));
+		DrawOpaqueOnly(gChar, gCharMtls, Matrix::CreateTranslation(200, 0, -20));
+		DrawOpaqueOnly(gZelda, gZeldaMtls, Matrix::CreateTranslation(0, 0, -20));
 	}
 
 	// ===== C) TRANSPARENT (잎 등 반투명) =====
@@ -293,9 +293,9 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->RSSetState(m_pNoCullRS);
 
 		// 잎(반투명)만
-		DrawTransparentOnly(gTree, gTreeMtls, Matrix::CreateTranslation(0, 0, -10));
-		// DrawTransparentOnly(gChar,  gCharMtls,  Matrix::CreateTranslation(0,0,-20));
-		// DrawTransparentOnly(gZelda, gZeldaMtls, Matrix::CreateTranslation(10,0,-20));
+		DrawTransparentOnly(gTree, gTreeMtls, Matrix::CreateTranslation(-200, 0, -10));
+		DrawTransparentOnly(gChar, gCharMtls, Matrix::CreateTranslation(200, 0, -20));
+		DrawTransparentOnly(gZelda, gZeldaMtls, Matrix::CreateTranslation(0, 0, -20));
 
 		// 상태 복원(선택)
 		m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
