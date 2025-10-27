@@ -55,6 +55,8 @@ public:
 	ID3D11DepthStencilState* m_pDSS_Opaque = nullptr; // depth write ON
 	ID3D11DepthStencilState* m_pDSS_Trans = nullptr; // depth write OFF
 			
+
+
 	XMMATRIX m_World;
 
 	bool OnInitialize() override;
@@ -106,5 +108,15 @@ private:
 	StaticMesh gTree, gChar, gZelda;
 	std::vector<MaterialGPU> gTreeMtls, gCharMtls, gZeldaMtls;
 	ID3D11RasterizerState* m_pNoCullRS = nullptr;
+
+	// Debug arrow pipeline & mesh
+	ID3D11VertexShader* m_pDbgVS = nullptr;
+	ID3D11PixelShader* m_pDbgPS = nullptr;
+	ID3D11InputLayout* m_pDbgIL = nullptr;
+	ID3D11Buffer* m_pArrowVB = nullptr;
+	ID3D11Buffer* m_pArrowIB = nullptr;
+	ID3D11RasterizerState* m_pDbgRS = nullptr;   // CullNone
+	
+	ID3D11Buffer* m_pDbgCB = nullptr;   // PS b3
 };
 

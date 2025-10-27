@@ -304,6 +304,75 @@ void TutorialApp::OnRender()
 		SAFE_RELEASE(oldDSS);
 	}
 
+	// ===== D) DEBUG: Directional light arrow in world (origin base, unlit) =====
+	{
+		// 1) -lightDir로 향하게 (광선 진행방향)
+		Vector3 D = -dir;   // dir은 이미 Vector3임
+		D.Normalize();      // 멤버 Normalize()는 in-place, 반환값 없음
+
+		// 2) 월드 행렬: origin에서 D 방향
+		Matrix worldArrow = Matrix::CreateWorld(Vector3::Zero, D, Vector3::UnitY);
+
+		// 3) CB0 업데이트 (World만 교체)
+		ConstantBuffer local = cb;
+		local.mWorld = XMMatrixTranspose(worldArrow);
+		local.mWorldInvTranspose = XMMatrixTranspose(worldArrow.Invert());
+		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
+		m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+
+		// 4) 상태 백업
+		ID3D11RasterizerState* oldRS = nullptr; m_pDeviceContext->RSGetState(&oldRS);
+		ID3D11DepthStencilState* oldDSS = nullptr; UINT oldRef = 0; m_pDeviceContext->OMGetDepthStencilState(&oldDSS, &oldRef);
+		ID3D11BlendState* oldBS = nullptr; float oldBF[4]; UINT oldSM = 0xFFFFFFFF; m_pDeviceContext->OMGetBlendState(&oldBS, oldBF, &oldSM);
+		ID3D11InputLayout* oldIL = nullptr; m_pDeviceContext->IAGetInputLayout(&oldIL);
+		ID3D11VertexShader* oldVS = nullptr; m_pDeviceContext->VSGetShader(&oldVS, nullptr, 0);
+		ID3D11PixelShader* oldPS = nullptr; m_pDeviceContext->PSGetShader(&oldPS, nullptr, 0);
+
+		// 5) 파이프라인 바인드 (깊이 ON, 블렌드 OFF, CullNone)
+		float bf[4] = { 0,0,0,0 };
+		m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
+		m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
+		if (m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS); // ★ 두꺼운 메시 양면
+
+		UINT stride = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT4);
+		UINT offset = 0;
+		m_pDeviceContext->IASetInputLayout(m_pDbgIL);
+		m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pArrowVB, &stride, &offset);
+		m_pDeviceContext->IASetIndexBuffer(m_pArrowIB, DXGI_FORMAT_R16_UINT, 0);
+		m_pDeviceContext->VSSetShader(m_pDbgVS, nullptr, 0);
+		m_pDeviceContext->PSSetShader(m_pDbgPS, nullptr, 0);
+
+		// 6) Draw
+		const UINT indexCount = 6   // back
+			+ 24 // sides
+			+ 6  // head base
+			+ 12;// head sides
+
+		// 항상 밝은 노랑(원하면 바꿔)
+		const DirectX::XMFLOAT4 kBright = { 1.0f, 0.95f, 0.2f, 1.0f };
+		m_pDeviceContext->UpdateSubresource(m_pDbgCB, 0, nullptr, &kBright, 0, 0);
+		m_pDeviceContext->PSSetConstantBuffers(3, 1, &m_pDbgCB);
+
+		// 혹시 남아있는 SRV 상태가 이상하게 영향 주는 카드가 있어서, 그냥 싹 언바인드
+		ID3D11ShaderResourceView* nullSRV[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
+		m_pDeviceContext->PSSetShaderResources(0, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT, nullSRV);
+
+		m_pDeviceContext->DrawIndexed(indexCount, 0, 0);
+
+		// 7) 상태 복원
+		m_pDeviceContext->VSSetShader(oldVS, nullptr, 0);
+		m_pDeviceContext->PSSetShader(oldPS, nullptr, 0);
+		m_pDeviceContext->IASetInputLayout(oldIL);
+		m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
+		m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldRef);
+		m_pDeviceContext->RSSetState(oldRS);
+		SAFE_RELEASE(oldVS); SAFE_RELEASE(oldPS); SAFE_RELEASE(oldIL);
+		SAFE_RELEASE(oldBS); SAFE_RELEASE(oldDSS); SAFE_RELEASE(oldRS);
+	}
+
+
+
 #ifdef _DEBUG
 	UpdateImGUI();
 #endif
@@ -337,6 +406,120 @@ bool TutorialApp::InitScene()
 		HR_T(CompileShaderFromFile(L"Shader/PixelShader.hlsl", "main", "ps_5_0", &psb));
 		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pMeshPS));
 		SAFE_RELEASE(psb);
+	}
+
+	// === DebugColor shaders / IL ===
+	{
+		ID3D10Blob* vsb = nullptr;
+		HR_T(CompileShaderFromFile(L"Shader/DebugColor_VS.hlsl", "main", "vs_5_0", &vsb));
+		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pDbgVS));
+
+		D3D11_INPUT_ELEMENT_DESC il[] = {
+			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+			{ "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		};
+		HR_T(m_pDevice->CreateInputLayout(il, _countof(il), vsb->GetBufferPointer(), vsb->GetBufferSize(), &m_pDbgIL));
+		SAFE_RELEASE(vsb);
+
+		ID3D10Blob* psb = nullptr;
+		HR_T(CompileShaderFromFile(L"Shader/DebugColor_PS.hlsl", "main", "ps_5_0", &psb));
+		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pDbgPS));
+		SAFE_RELEASE(psb);
+	}
+
+	// === Debug Arrow mesh (월드축 +Z 기준) ===
+	{
+		struct V { DirectX::XMFLOAT3 p; DirectX::XMFLOAT4 c; };
+		// 굵기/길이(원하면 숫자만 바꿔)
+		const float halfT = 6.0f;     // 샤프트 반두께 → 전체 두께 12
+		const float shaftLen = 120.0f;   // 샤프트 길이
+		const float headLen = 30.0f;    // 화살촉 길이
+		const float headHalf = 10.0f;    // 화살촉 베이스 반폭
+		const DirectX::XMFLOAT4 YELLOW = { 1.0f, 0.9f, 0.1f, 1.0f };
+
+		// 인덱스 매핑용
+		enum {
+			s0, s1, s2, s3, s4, s5, s6, s7, // shaft 8
+			h0, h1, h2, h3,                 // head base 4
+			tip,                            // tip 1
+			COUNT
+		};
+
+		V verts[COUNT] = {
+			// shaft back(z=0)
+			{{-halfT,-halfT, 0}, YELLOW}, {{+halfT,-halfT, 0}, YELLOW},
+			{{+halfT,+halfT, 0}, YELLOW}, {{-halfT,+halfT, 0}, YELLOW},
+			// shaft front(z=shaftLen)
+			{{-halfT,-halfT, shaftLen}, YELLOW}, {{+halfT,-halfT, shaftLen}, YELLOW},
+			{{+halfT,+halfT, shaftLen}, YELLOW}, {{-halfT,+halfT, shaftLen}, YELLOW},
+
+			// head base at z=shaftLen (더 넓게)
+			{{-headHalf,-headHalf, shaftLen}, YELLOW},
+			{{+headHalf,-headHalf, shaftLen}, YELLOW},
+			{{+headHalf,+headHalf, shaftLen}, YELLOW},
+			{{-headHalf,+headHalf, shaftLen}, YELLOW},
+
+			// tip
+			{{0,0, shaftLen + headLen}, YELLOW},
+		};
+
+		// CW/CCW 신경 안 쓰게 CullNone로 렌더할 거라 인덱스는 보기 좋게만 구성
+		uint16_t idx[] = {
+			// shaft back face (z=0)
+			s0,s2,s1,  s0,s3,s2,
+			// shaft sides (front cap은 빼서 z-파이팅 방지)
+			// bottom (y=-halfT)
+			s0,s1,s5,  s0,s5,s4,
+			// right (x=+halfT)
+			s1,s2,s6,  s1,s6,s5,
+			// top (y=+halfT)
+			s3,s7,s6,  s3,s6,s2,
+			// left (x=-halfT)
+			s0,s4,s7,  s0,s7,s3,
+
+			// head base cap (닫아줌)
+			h0,h1,h2,  h0,h2,h3,
+			// head sides
+			h0,h1,tip,
+			h1,h2,tip,
+			h2,h3,tip,
+			h3,h0,tip,
+		};
+
+		// VB
+		D3D11_BUFFER_DESC vbd{};
+		vbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+		vbd.Usage = D3D11_USAGE_IMMUTABLE;
+		vbd.ByteWidth = sizeof(verts);
+		D3D11_SUBRESOURCE_DATA vinit{ verts };
+		HR_T(m_pDevice->CreateBuffer(&vbd, &vinit, &m_pArrowVB));
+
+		// IB
+		D3D11_BUFFER_DESC ibd{};
+		ibd.BindFlags = D3D11_BIND_INDEX_BUFFER;
+		ibd.Usage = D3D11_USAGE_IMMUTABLE;
+		ibd.ByteWidth = sizeof(idx);
+		D3D11_SUBRESOURCE_DATA iinit{ idx };
+		HR_T(m_pDevice->CreateBuffer(&ibd, &iinit, &m_pArrowIB));
+	}
+
+	// === Debug RS: Cull None (양면 렌더) ===
+	{
+		D3D11_RASTERIZER_DESC rd{};
+		rd.FillMode = D3D11_FILL_SOLID;
+		rd.CullMode = D3D11_CULL_NONE;    // ★ 양면
+		rd.FrontCounterClockwise = FALSE;
+		rd.DepthClipEnable = TRUE;
+		HR_T(m_pDevice->CreateRasterizerState(&rd, &m_pDbgRS));
+	}
+
+	// PS b3: dbgColor
+	{
+		D3D11_BUFFER_DESC bd{};
+		bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		bd.Usage = D3D11_USAGE_DEFAULT;
+		bd.ByteWidth = 16; // float4 = 16
+		HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pDbgCB));
 	}
 
 	// 2) 상수버퍼(CB0, b1, b2) + 샘플러 ==================================================
@@ -638,6 +821,14 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pSkySampler);
 	SAFE_RELEASE(m_pSkyDSS);
 	SAFE_RELEASE(m_pSkyRS);
+
+	SAFE_RELEASE(m_pDbgRS);
+	SAFE_RELEASE(m_pArrowIB);
+	SAFE_RELEASE(m_pArrowVB);
+	SAFE_RELEASE(m_pDbgIL);
+	SAFE_RELEASE(m_pDbgVS);
+	SAFE_RELEASE(m_pDbgPS);
+	SAFE_RELEASE(m_pDbgCB);
 }
 
 void TutorialApp::UninitD3D()
