@@ -121,7 +121,7 @@ void Camera::OnInputProcess(const Keyboard::State& KeyState, const Keyboard::Key
 	}
 	else if (KeyState.IsKeyDown(DirectX::Keyboard::Keys::F2))
 	{
-		SetSpeed(500);
+		SetSpeed(300);
 	}
 	else if (KeyState.IsKeyDown(DirectX::Keyboard::Keys::F3))
 	{

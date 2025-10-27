@@ -113,7 +113,7 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->RSSetState(m_pDbgRS);
 	}
 	else {
-		m_pDeviceContext->RSSetState(m_pCullBackRS ? m_pCullBackRS : m_pNoCullRS);
+		m_pDeviceContext->RSSetState(m_pCullBackRS); // ← 깔끔
 	}
 
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
@@ -310,6 +310,20 @@ void TutorialApp::OnRender()
 		}
 	}
 
+	// ===== (투명 패스 전) RS 백업 & 필요시 override =====
+	ID3D11RasterizerState* oldRS = nullptr;
+	m_pDeviceContext->RSGetState(&oldRS); // AddRef됨
+
+	// wireframe가 켜져있으면 wire RS(이미 CullNone) 우선, 아니면 CullNone(SOLID)
+	ID3D11RasterizerState* passRS = nullptr;
+	if (mDbg.wireframe && m_pWireRS) {
+		passRS = m_pWireRS;
+	}
+	else if (mDbg.cullNone && m_pDbgRS) { // m_pDbgRS = SOLID + CullNone
+		passRS = m_pDbgRS;
+	}
+	if (passRS) m_pDeviceContext->RSSetState(passRS);
+
 	// ===== C) TRANSPARENT =====
 	{
 		ID3D11BlendState* oldBS = nullptr; float oldBF[4]; UINT oldSM = 0xFFFFFFFF;
@@ -327,9 +341,7 @@ void TutorialApp::OnRender()
 			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Trans, 0);
 		}
 
-		// 얇은 잎 양면 필요시
-		if (mDbg.cullNone && m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS);
-
+		// ★ 여기 있던 RSSetState(m_pDbgRS) 한 줄은 제거하세요 (이미 위에서 처리)
 		if (mDbg.showTransparent) {
 			if (mTreeX.enabled)  DrawTransparentOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
 			if (mCharX.enabled)  DrawTransparentOnly(gChar, gCharMtls, ComposeSRT(mCharX));
@@ -339,6 +351,12 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
 		m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldSR);
 		SAFE_RELEASE(oldBS); SAFE_RELEASE(oldDSS);
+	}
+
+	// ===== 투명 패스 끝나고 RS 복원 =====
+	if (oldRS) {
+		m_pDeviceContext->RSSetState(oldRS);
+		oldRS->Release();
 	}
 
 	// ===== D) DEBUG: Directional light arrow in world (origin base, unlit) =====
@@ -543,36 +561,11 @@ bool TutorialApp::InitScene()
 		HR_T(m_pDevice->CreateBuffer(&ibd, &iinit, &m_pArrowIB));
 	}
 
-	{
-		// BACK 컬(정상 렌더)
-		D3D11_RASTERIZER_DESC rd{};
-		rd.FillMode = D3D11_FILL_SOLID;
-		rd.CullMode = D3D11_CULL_BACK;
-		rd.FrontCounterClockwise = FALSE;
-		rd.DepthClipEnable = TRUE;
-		HR_T(m_pDevice->CreateRasterizerState(&rd, &m_pCullBackRS));
-
-		// 와이어프레임 + 양면
-		D3D11_RASTERIZER_DESC rw{};
-		rw.FillMode = D3D11_FILL_WIREFRAME;
-		rw.CullMode = D3D11_CULL_NONE;
-		rw.FrontCounterClockwise = FALSE;
-		rw.DepthClipEnable = TRUE;
-		HR_T(m_pDevice->CreateRasterizerState(&rw, &m_pWireRS));
-
-		// 깊이 끔(디버깅)
-		D3D11_DEPTH_STENCIL_DESC dsOff{};
-		dsOff.DepthEnable = FALSE;
-		dsOff.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-		dsOff.StencilEnable = FALSE;
-		HR_T(m_pDevice->CreateDepthStencilState(&dsOff, &m_pDSS_Disabled));
-	}
-
 	// ===== 초기 트랜스폼 스냅샷(원하면 초기 위치 바꿔라) =====
-	mTreeX.pos = { -100, -150, 0 };  mTreeX.initPos = mTreeX.pos;
+	mTreeX.pos = { -100, -150, 100 };  mTreeX.initPos = mTreeX.pos;
 	mTreeX.scl = { 100,100,100 };
-	mCharX.pos = { 100, -150, 0 };  mCharX.initPos = mCharX.pos;
-	mZeldaX.pos = { 0, -150, 150 };  mZeldaX.initPos = mZeldaX.pos;
+	mCharX.pos = { 100, -150, 100 };  mCharX.initPos = mCharX.pos;
+	mZeldaX.pos = { 0, -150, 250 };  mZeldaX.initPos = mZeldaX.pos;
 
 	mTreeX.initScl = mTreeX.scl; mCharX.initScl = mCharX.scl; mZeldaX.initScl = mZeldaX.scl;
 	mTreeX.initRotD = mTreeX.rotD; mCharX.initRotD = mCharX.rotD; mZeldaX.initRotD = mZeldaX.rotD;
@@ -651,16 +644,39 @@ bool TutorialApp::InitScene()
 		BuildAll(L"../Resource/Character/Character.fbx", L"../Resource/Character/", gChar, gCharMtls);
 		BuildAll(L"../Resource/Zelda/zeldaPosed001.fbx", L"../Resource/Zelda/", gZelda, gZeldaMtls);
 	}
+	// === Rasterizer states ===
+	{
+		// BACK 컬 (기본)
+		D3D11_RASTERIZER_DESC rsBack{};
+		rsBack.FillMode = D3D11_FILL_SOLID;
+		rsBack.CullMode = D3D11_CULL_BACK;
+		rsBack.FrontCounterClockwise = FALSE;
+		rsBack.DepthClipEnable = TRUE;
+		HR_T(m_pDevice->CreateRasterizerState(&rsBack, &m_pCullBackRS));
 
-	// 4) 초기 프로젝션/월드 값(있다면 유지) ==============================================
-	// - m_Projection, m_World 등은 네 기존 코드 흐름(윈도우 리사이즈/카메라 세팅)에서 갱신되므로 여기선 건드리지 않아도 OK.
+		// SOLID + Cull None (양면)  ← ★ 새로 추가
+		D3D11_RASTERIZER_DESC rsNone{};
+		rsNone.FillMode = D3D11_FILL_SOLID;
+		rsNone.CullMode = D3D11_CULL_NONE;
+		rsNone.FrontCounterClockwise = FALSE;
+		rsNone.DepthClipEnable = TRUE;
+		HR_T(m_pDevice->CreateRasterizerState(&rsNone, &m_pDbgRS)); // 이름 유지해도 되고 m_pCullNoneRS로 바꿔도 됨
 
-	D3D11_RASTERIZER_DESC rd{};
-	rd.FillMode = D3D11_FILL_SOLID;
-	rd.CullMode = D3D11_CULL_BACK;        // 너처럼 양면 필요하면 NONE
-	rd.FrontCounterClockwise = FALSE;
-	rd.DepthClipEnable = TRUE;            // ★ 반드시 켜라
-	HR_T(m_pDevice->CreateRasterizerState(&rd, &m_pNoCullRS));
+		// 와이어프레임 + Cull None
+		D3D11_RASTERIZER_DESC rw{};
+		rw.FillMode = D3D11_FILL_WIREFRAME;
+		rw.CullMode = D3D11_CULL_NONE;
+		rw.FrontCounterClockwise = FALSE;
+		rw.DepthClipEnable = TRUE;
+		HR_T(m_pDevice->CreateRasterizerState(&rw, &m_pWireRS));
+
+		// 깊이 끔(디버깅)
+		D3D11_DEPTH_STENCIL_DESC dsOff{};
+		dsOff.DepthEnable = FALSE;
+		dsOff.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+		dsOff.StencilEnable = FALSE;
+		HR_T(m_pDevice->CreateDepthStencilState(&dsOff, &m_pDSS_Disabled));
+	}
 
 	//======================  SKYBOX: Shaders / IL  ======================
 	{

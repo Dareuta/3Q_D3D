@@ -174,7 +174,7 @@ private:
 		return S * R * T; // SRT
 	}
 
-	Vector3 m_ArrowPos{ 0.0f, -100.0f, 0.0f };
+	Vector3 m_ArrowPos{ 0.0f, -100.0f, 100.0f };
 	Vector3 m_ArrowScale{ 1.0f,  1.0f,  1.0f };	
 };
 
