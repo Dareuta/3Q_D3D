@@ -410,8 +410,9 @@ bool TutorialApp::InitScene()
 
 	D3D11_RASTERIZER_DESC rd{};
 	rd.FillMode = D3D11_FILL_SOLID;
-	rd.CullMode = D3D11_CULL_NONE;         // ★ 컬링 끔
-	rd.FrontCounterClockwise = FALSE;      // 일단 기본
+	rd.CullMode = D3D11_CULL_BACK;        // 너처럼 양면 필요하면 NONE
+	rd.FrontCounterClockwise = FALSE;
+	rd.DepthClipEnable = TRUE;            // ★ 반드시 켜라
 	HR_T(m_pDevice->CreateRasterizerState(&rd, &m_pNoCullRS));
 
 	//======================  SKYBOX: Shaders / IL  ======================
