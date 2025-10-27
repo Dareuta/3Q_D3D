@@ -37,7 +37,14 @@ float4 main(PS_INPUT input) : SV_Target
 
     // ---- 1) 셰이딩 ----
     float3 albedo   = (useDiffuse  != 0) ? txDiffuse .Sample(samLinear, input.Tex).rgb : float3(1,1,1);
-    float  specMask = (useSpecular != 0) ? txSpecular.Sample(samLinear, input.Tex).r   : 1.0f;
+   // 스펙 상태 (0=off, 1=use map, 2=no map)
+    uint uSpec = useSpecular;
+    bool specOn = (uSpec != 0);
+
+// 스펙 마스크: 맵 있으면 샘플, 없으면 1.0, 끄면 0.0
+    float specMask = (uSpec == 1) ? txSpecular.Sample(samLinear, input.Tex).r :
+                   (uSpec == 2) ? 1.0f : 0.0f;
+    
     float3 emissive = (useEmissive != 0) ? txEmissive.Sample(samLinear, input.Tex).rgb : float3(0,0,0);
 
     float3 Nw_base = normalize(input.NormalW);
@@ -55,7 +62,8 @@ float4 main(PS_INPUT input) : SV_Target
 
     float  NdotL = saturate(dot(Nw, L));
     float3 diff  = albedo * NdotL;
-    float3 spec  = specMask * ks * pow(saturate(dot(Nw, H)), shin);
+    float3 spec = specOn * specMask * ks * pow(saturate(dot(Nw, H)), shin);
+
     float3 amb   = I_ambient.rgb * kA.rgb * albedo;
 
     float3 color = amb + emissive + vLightColor.rgb * (diff + spec);

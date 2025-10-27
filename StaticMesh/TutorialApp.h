@@ -19,6 +19,10 @@
 class TutorialApp : public GameApp
 {
 public:
+	using Vector2 = DirectX::SimpleMath::Vector2;
+	using Vector3 = DirectX::SimpleMath::Vector3;
+	using Vector4 = DirectX::SimpleMath::Vector4;
+	using Matrix = DirectX::SimpleMath::Matrix;
 	/*
 	*	D3D 필수 4종.
 	*	Device: 리소스 생성용 팩토리.
@@ -76,12 +80,12 @@ public:
 	//================================================================================================
 
 private:
-	float color[3] = { 0.1f, 0.11f, 0.13f };
+	float color[4] = { 0.10f, 0.11f, 0.13f, 1.0f }; 
 	float spinSpeed = 0.0f;
 
 	float m_FovDegree = 60.0f;    // degrees
 	float m_Near = 0.1f;
-	float m_Far = 100.0f;
+	float m_Far = 5000.0f;
 
 	float m_LightYaw = XMConvertToRadians(45.0f);         // -π ~ +π (Y축 기준으로 회전) << 좌우로 회전
 	float m_LightPitch = XMConvertToRadians(-20.0f);       // -π/2 ~ +π/2 (하늘/땅 제한용) ( X축 기준으로 회전) << 위 아래로 끄덕
@@ -118,5 +122,59 @@ private:
 	ID3D11RasterizerState* m_pDbgRS = nullptr;   // CullNone
 	
 	ID3D11Buffer* m_pDbgCB = nullptr;   // PS b3
+
+	
+	// ======= TutorialApp.h (클래스 내부 private 쪽) =======
+	struct XformUI {
+		DirectX::SimpleMath::Vector3 pos{ 0,0,0 };
+		DirectX::SimpleMath::Vector3 rotD{ 0,0,0 }; // degrees
+		DirectX::SimpleMath::Vector3 scl{ 1,1,1 };
+		// reset용 스냅샷
+		DirectX::SimpleMath::Vector3 initPos{ 0,0,0 }, initRotD{ 0,0,0 }, initScl{ 1,1,1 };
+		bool enabled = true; // 그 모델을 그릴지 토글
+	};
+
+	struct DebugToggles {
+		bool showSky = true;
+		bool showOpaque = true;
+		bool showTransparent = true;
+		bool showLightArrow = true;
+
+		bool wireframe = false;
+		bool cullNone = false;   // 강제로 양면
+		bool depthWriteOff = false;   // 디버깅용(메쉬)
+		bool freezeTime = false;
+
+		bool disableNormal = false;   // 맵 무효화(UseCB 오버라이드)
+		bool disableSpecular = false;
+		bool disableEmissive = false;
+		bool forceAlphaClip = false;   // 투명물도 클립 임시 테스트
+		float alphaCut = 0.4f;    // 클립 기준
+	};
+
+	XformUI mTreeX, mCharX, mZeldaX;
+	DebugToggles mDbg;
+
+	// RS/DS 디버그용 상태
+	ID3D11RasterizerState* m_pWireRS = nullptr; // 와이어 + CullNone
+	ID3D11RasterizerState* m_pCullBackRS = nullptr; // 기본 BACK(이름 바로잡음)
+	ID3D11DepthStencilState* m_pDSS_Disabled = nullptr; // DepthEnable=FALSE
+
+	// 유틸: XformUI -> 월드행렬
+	static DirectX::SimpleMath::Matrix ComposeSRT(const XformUI& xf) {
+		using namespace DirectX;
+		using namespace DirectX::SimpleMath;
+		Matrix S = Matrix::CreateScale(xf.scl);
+		Matrix R = Matrix::CreateFromYawPitchRoll(
+			XMConvertToRadians(xf.rotD.y),
+			XMConvertToRadians(xf.rotD.x),
+			XMConvertToRadians(xf.rotD.z)
+		);
+		Matrix T = Matrix::CreateTranslation(xf.pos);
+		return S * R * T; // SRT
+	}
+
+	Vector3 m_ArrowPos{ 0.0f, -100.0f, 0.0f };
+	Vector3 m_ArrowScale{ 1.0f,  1.0f,  1.0f };	
 };
 

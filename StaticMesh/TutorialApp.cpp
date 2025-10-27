@@ -13,7 +13,7 @@
 #pragma comment (lib, "d3d11.lib")
 #pragma comment(lib,"d3dcompiler.lib")
 
-using namespace DirectX::SimpleMath; // 남발하면 오염됨 아무튼 많이 쓰지 마셈
+
 
 // GPU가 기대하고 있는 메모리 레이아웃과 1대1로 대응해야한다
 struct ConstantBuffer // 상수버퍼
@@ -75,14 +75,20 @@ void TutorialApp::OnUninitialize()
 
 void TutorialApp::OnUpdate()
 {
-	float t = GameTimer::m_Instance->TotalTime();
+	static float tHold = 0.0f;
+	if (!mDbg.freezeTime) {
+		tHold = GameTimer::m_Instance->TotalTime();
+	}
 
+	float t = tHold; // 고정 또는 진행
 	XMMATRIX mSpin = XMMatrixRotationY(t * spinSpeed);
+
+	// 여기서 m_World는 디폴트만 유지. 실제 각 모델 월드는 Draw 시 ComposeSRT로 처리
 	XMMATRIX mScaleA = XMMatrixScaling(cubeScale.x, cubeScale.y, cubeScale.z);
 	XMMATRIX mTranslateA = XMMatrixTranslation(cubeTransformA.x, cubeTransformA.y, cubeTransformA.z);
-
-	m_World = mScaleA * mSpin * mTranslateA; // SRT
+	m_World = mScaleA * mSpin * mTranslateA;
 }
+
 
 //================================================================================================
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -99,7 +105,17 @@ void TutorialApp::OnRender()
 
 	float aspect = m_ClientWidth / (float)m_ClientHeight;
 
-	m_pDeviceContext->RSSetState(m_pNoCullRS);
+	// RS 선택: wire > cullNone > backCull
+	if (mDbg.wireframe && m_pWireRS) {
+		m_pDeviceContext->RSSetState(m_pWireRS);
+	}
+	else if (mDbg.cullNone && m_pDbgRS) {
+		m_pDeviceContext->RSSetState(m_pDbgRS);
+	}
+	else {
+		m_pDeviceContext->RSSetState(m_pCullBackRS ? m_pCullBackRS : m_pNoCullRS);
+	}
+
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
 	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
@@ -164,11 +180,17 @@ void TutorialApp::OnRender()
 
 				UseCB use{};
 				use.useDiffuse = mat.hasDiffuse ? 1u : 0u;
-				use.useNormal = mat.hasNormal ? 1u : 0u;
-				use.useSpecular = mat.hasSpecular ? 1u : 0u;
-				use.useEmissive = mat.hasEmissive ? 1u : 0u;
-				use.useOpacity = 0u;       // 불투명
-				use.alphaCut = -1.0f;    // clip 안함
+				use.useNormal = (mat.hasNormal && !mDbg.disableNormal) ? 1u : 0u;
+				use.useSpecular = (!mDbg.disableSpecular) ? (mat.hasSpecular ? 1u : 2u) : 0u;
+
+				use.useEmissive = (mat.hasEmissive && !mDbg.disableEmissive) ? 1u : 0u;
+				use.useOpacity = /* OpaqueOnly */ 0u /* TransparentOnly 에선 1u */;
+				if (mDbg.forceAlphaClip) {
+					use.alphaCut = mDbg.alphaCut;  // 클립 활성
+				}
+				else {
+					use.alphaCut = -1.0f;          // 클립 비활성
+				}
 
 				m_pDeviceContext->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
 				m_pDeviceContext->PSSetConstantBuffers(2, 1, &m_pUseCB);
@@ -188,24 +210,26 @@ void TutorialApp::OnRender()
 			local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
 			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 
-			// (간단 버전: 정렬 없이 렌더. 필요하면 뒤→앞 정렬 추가)
 			for (size_t i = 0; i < mesh.Ranges().size(); ++i)
 			{
 				const auto& r = mesh.Ranges()[i];
 				const auto& mat = mtls[r.materialIndex];
 
-				// 반투명만 (opacity 텍스처 있는 서브메시)
 				if (!mat.hasOpacity) continue;
 
 				mat.Bind(m_pDeviceContext);
 
 				UseCB use{};
 				use.useDiffuse = mat.hasDiffuse ? 1u : 0u;
-				use.useNormal = mat.hasNormal ? 1u : 0u;
-				use.useSpecular = mat.hasSpecular ? 1u : 0u;
-				use.useEmissive = mat.hasEmissive ? 1u : 0u;
-				use.useOpacity = 1u;       // 반드시 On
-				use.alphaCut = -1.0f;    // clip 비활성 → 블렌딩
+				use.useNormal = (mat.hasNormal && !mDbg.disableNormal) ? 1u : 0u;
+				use.useSpecular = (!mDbg.disableSpecular) ? (mat.hasSpecular ? 1u : 2u) : 0u;
+
+				use.useEmissive = (mat.hasEmissive && !mDbg.disableEmissive) ? 1u : 0u;
+				use.useOpacity = 1u; // 투명
+
+				// 강제 컷아웃 테스트 모드 지원
+				use.alphaCut = mDbg.forceAlphaClip ? mDbg.alphaCut : -1.0f;
+
 
 				m_pDeviceContext->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
 				m_pDeviceContext->PSSetConstantBuffers(2, 1, &m_pUseCB);
@@ -216,7 +240,7 @@ void TutorialApp::OnRender()
 		};
 
 	// ===== A) SKYBOX FIRST =====
-	{
+	if (mDbg.showSky) {
 		// RS/OM 상태 백업
 		ID3D11RasterizerState* oldRS = nullptr;
 		m_pDeviceContext->RSGetState(&oldRS);
@@ -265,21 +289,29 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->PSSetShader(m_pMeshPS, nullptr, 0);
 	if (m_pSamplerLinear) m_pDeviceContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
 
-	// ===== B) OPAQUE (트렁크 등) =====
+
+
+	// ===== B) OPAQUE =====
 	{
 		float bf[4] = { 0,0,0,0 };
 		m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
-		m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
 
-		// 트렁크(불투명)만
-		DrawOpaqueOnly(gTree, gTreeMtls, Matrix::CreateTranslation(-200, 0, -10));
-		DrawOpaqueOnly(gChar, gCharMtls, Matrix::CreateTranslation(200, 0, -20));
-		DrawOpaqueOnly(gZelda, gZeldaMtls, Matrix::CreateTranslation(0, 0, -20));
+		if (mDbg.depthWriteOff && m_pDSS_Disabled) {
+			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Disabled, 0);
+		}
+		else {
+			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
+		}
+
+		if (mDbg.showOpaque) {
+			if (mTreeX.enabled)  DrawOpaqueOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
+			if (mCharX.enabled)  DrawOpaqueOnly(gChar, gCharMtls, ComposeSRT(mCharX));
+			if (mZeldaX.enabled) DrawOpaqueOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
+		}
 	}
 
-	// ===== C) TRANSPARENT (잎 등 반투명) =====
+	// ===== C) TRANSPARENT =====
 	{
-		// 상태 백업(선택)
 		ID3D11BlendState* oldBS = nullptr; float oldBF[4]; UINT oldSM = 0xFFFFFFFF;
 		m_pDeviceContext->OMGetBlendState(&oldBS, oldBF, &oldSM);
 		ID3D11DepthStencilState* oldDSS = nullptr; UINT oldSR = 0;
@@ -287,31 +319,37 @@ void TutorialApp::OnRender()
 
 		float bf[4] = { 0,0,0,0 };
 		m_pDeviceContext->OMSetBlendState(m_pBS_Alpha, bf, 0xFFFFFFFF);
-		m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Trans, 0);
 
-		// 얇은 잎은 양면 필요시 Cull None(이미 전체 NoCull이면 생략)
-		m_pDeviceContext->RSSetState(m_pNoCullRS);
+		if (mDbg.depthWriteOff && m_pDSS_Disabled) {
+			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Disabled, 0);
+		}
+		else {
+			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Trans, 0);
+		}
 
-		// 잎(반투명)만
-		DrawTransparentOnly(gTree, gTreeMtls, Matrix::CreateTranslation(-200, 0, -10));
-		DrawTransparentOnly(gChar, gCharMtls, Matrix::CreateTranslation(200, 0, -20));
-		DrawTransparentOnly(gZelda, gZeldaMtls, Matrix::CreateTranslation(0, 0, -20));
+		// 얇은 잎 양면 필요시
+		if (mDbg.cullNone && m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS);
 
-		// 상태 복원(선택)
+		if (mDbg.showTransparent) {
+			if (mTreeX.enabled)  DrawTransparentOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
+			if (mCharX.enabled)  DrawTransparentOnly(gChar, gCharMtls, ComposeSRT(mCharX));
+			if (mZeldaX.enabled) DrawTransparentOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
+		}
+
 		m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
 		m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldSR);
-		SAFE_RELEASE(oldBS);
-		SAFE_RELEASE(oldDSS);
+		SAFE_RELEASE(oldBS); SAFE_RELEASE(oldDSS);
 	}
 
 	// ===== D) DEBUG: Directional light arrow in world (origin base, unlit) =====
-	{
+	if (mDbg.showLightArrow) {
 		// 1) -lightDir로 향하게 (광선 진행방향)
 		Vector3 D = -dir;   // dir은 이미 Vector3임
 		D.Normalize();      // 멤버 Normalize()는 in-place, 반환값 없음
 
-		// 2) 월드 행렬: origin에서 D 방향
-		Matrix worldArrow = Matrix::CreateWorld(Vector3::Zero, D, Vector3::UnitY);
+		Matrix worldArrow =
+			Matrix::CreateScale(m_ArrowScale) *
+			Matrix::CreateWorld(m_ArrowPos, D, Vector3::UnitY);
 
 		// 3) CB0 업데이트 (World만 교체)
 		ConstantBuffer local = cb;
@@ -444,6 +482,7 @@ bool TutorialApp::InitScene()
 			tip,                            // tip 1
 			COUNT
 		};
+		const float zEps = 0.05f; // 0.01~0.2 사이에서 취향대로
 
 		V verts[COUNT] = {
 			// shaft back(z=0)
@@ -453,7 +492,7 @@ bool TutorialApp::InitScene()
 			{{-halfT,-halfT, shaftLen}, YELLOW}, {{+halfT,-halfT, shaftLen}, YELLOW},
 			{{+halfT,+halfT, shaftLen}, YELLOW}, {{-halfT,+halfT, shaftLen}, YELLOW},
 
-			// head base at z=shaftLen (더 넓게)
+			
 			{{-headHalf,-headHalf, shaftLen}, YELLOW},
 			{{+headHalf,-headHalf, shaftLen}, YELLOW},
 			{{+headHalf,+headHalf, shaftLen}, YELLOW},
@@ -478,7 +517,8 @@ bool TutorialApp::InitScene()
 			s0,s4,s7,  s0,s7,s3,
 
 			// head base cap (닫아줌)
-			h0,h1,h2,  h0,h2,h3,
+			h2,h1,h0,  
+			h3,h2,h0,
 			// head sides
 			h0,h1,tip,
 			h1,h2,tip,
@@ -503,15 +543,39 @@ bool TutorialApp::InitScene()
 		HR_T(m_pDevice->CreateBuffer(&ibd, &iinit, &m_pArrowIB));
 	}
 
-	// === Debug RS: Cull None (양면 렌더) ===
 	{
+		// BACK 컬(정상 렌더)
 		D3D11_RASTERIZER_DESC rd{};
 		rd.FillMode = D3D11_FILL_SOLID;
-		rd.CullMode = D3D11_CULL_NONE;    // ★ 양면
+		rd.CullMode = D3D11_CULL_BACK;
 		rd.FrontCounterClockwise = FALSE;
 		rd.DepthClipEnable = TRUE;
-		HR_T(m_pDevice->CreateRasterizerState(&rd, &m_pDbgRS));
+		HR_T(m_pDevice->CreateRasterizerState(&rd, &m_pCullBackRS));
+
+		// 와이어프레임 + 양면
+		D3D11_RASTERIZER_DESC rw{};
+		rw.FillMode = D3D11_FILL_WIREFRAME;
+		rw.CullMode = D3D11_CULL_NONE;
+		rw.FrontCounterClockwise = FALSE;
+		rw.DepthClipEnable = TRUE;
+		HR_T(m_pDevice->CreateRasterizerState(&rw, &m_pWireRS));
+
+		// 깊이 끔(디버깅)
+		D3D11_DEPTH_STENCIL_DESC dsOff{};
+		dsOff.DepthEnable = FALSE;
+		dsOff.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+		dsOff.StencilEnable = FALSE;
+		HR_T(m_pDevice->CreateDepthStencilState(&dsOff, &m_pDSS_Disabled));
 	}
+
+	// ===== 초기 트랜스폼 스냅샷(원하면 초기 위치 바꿔라) =====
+	mTreeX.pos = { -100, -150, 0 };  mTreeX.initPos = mTreeX.pos;
+	mTreeX.scl = { 100,100,100 };
+	mCharX.pos = { 100, -150, 0 };  mCharX.initPos = mCharX.pos;
+	mZeldaX.pos = { 0, -150, 150 };  mZeldaX.initPos = mZeldaX.pos;
+
+	mTreeX.initScl = mTreeX.scl; mCharX.initScl = mCharX.scl; mZeldaX.initScl = mZeldaX.scl;
+	mTreeX.initRotD = mTreeX.rotD; mCharX.initRotD = mCharX.rotD; mZeldaX.initRotD = mZeldaX.rotD;
 
 	// PS b3: dbgColor
 	{
@@ -829,6 +893,10 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pDbgVS);
 	SAFE_RELEASE(m_pDbgPS);
 	SAFE_RELEASE(m_pDbgCB);
+
+	SAFE_RELEASE(m_pWireRS);
+	SAFE_RELEASE(m_pCullBackRS);
+	SAFE_RELEASE(m_pDSS_Disabled);
 }
 
 void TutorialApp::UninitD3D()
@@ -876,13 +944,13 @@ void TutorialApp::UpdateImGUI()
 	ImGui::NewFrame();
 
 	ImGui::SetNextWindowSize(ImVec2(420, 0), ImGuiCond_FirstUseEver);
-	if (ImGui::Begin(u8"임꾸이(IMGUI)"))  // 창 제목만 깔끔히
+	if (ImGui::Begin(u8"임꾸이(IMGUI)"))
 	{
-		// 0) 상단 바 — 프레임/리셋
+		// 상단 상태
 		ImGui::Text("FPS: %.1f (%.3f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
 		ImGui::Separator();
 
-		// 섹션별 기본값 저장 (최초 한 번)
+		// 스냅샷 1회 저장
 		static bool s_inited = false;
 		static Vector3 s_initCubePos{}, s_initCubeScale{};
 		static float   s_initSpin = 0.0f, s_initFov = 60.0f, s_initNear = 0.001f, s_initFar = 1.0f;
@@ -890,56 +958,34 @@ void TutorialApp::UpdateImGUI()
 		static float   s_initLightYaw = 0.0f, s_initLightPitch = 0.0f, s_initLightIntensity = 1.0f;
 		static Vector3 s_initKa{}, s_initIa{};
 		static float   s_initKs = 0.5f, s_initShin = 32.0f;
+		static Vector3 s_initArrowPos{}, s_initArrowScale{};
 		if (!s_inited) {
 			s_inited = true;
-			s_initCubePos = cubeTransformA;
-			s_initCubeScale = cubeScale;
-			s_initSpin = spinSpeed;
-			s_initFov = m_FovDegree;
-			s_initNear = m_Near;
-			s_initFar = m_Far;
-			s_initLightColor = m_LightColor;
-			s_initLightYaw = m_LightYaw;
-			s_initLightPitch = m_LightPitch;
-			s_initLightIntensity = m_LightIntensity;
-			s_initKa = m_Ka; s_initIa = m_Ia;
-			s_initKs = m_Ks; s_initShin = m_Shininess;
+			s_initCubePos = cubeTransformA;   s_initCubeScale = cubeScale;   s_initSpin = spinSpeed;
+			s_initFov = m_FovDegree;          s_initNear = m_Near;           s_initFar = m_Far;
+			s_initLightColor = m_LightColor;  s_initLightYaw = m_LightYaw;   s_initLightPitch = m_LightPitch; s_initLightIntensity = m_LightIntensity;
+			s_initKa = m_Ka; s_initIa = m_Ia; s_initKs = m_Ks; s_initShin = m_Shininess;
+			s_initArrowPos = m_ArrowPos;      s_initArrowScale = m_ArrowScale;
 		}
 
-		// 2) Transform
-		if (ImGui::CollapsingHeader("Transform"))
-		{
-			ImGui::DragFloat3("Position", (float*)&cubeTransformA, 0.05f, -100.0f, 100.0f);
-			ImGui::DragFloat3("Scale", (float*)&cubeScale, 0.01f, 0.001f, 100.0f);
-			ImGui::SliderFloat("Spin Speed", &spinSpeed, 0.0f, 10.0f, "%.2f");
-
-			if (ImGui::Button(u8"변환 초기화")) {
-				cubeTransformA = s_initCubePos;
-				cubeScale = s_initCubeScale;
-				spinSpeed = s_initSpin;
-			}
-		}
-
-		// 3) Camera
-		if (ImGui::CollapsingHeader("Camera"))
+		// === Camera ===
+		if (ImGui::CollapsingHeader(u8"Camera", ImGuiTreeNodeFlags_DefaultOpen))
 		{
 			ImGui::SliderFloat("FOV (deg)", &m_FovDegree, 10.0f, 120.0f, "%.1f");
 			ImGui::DragFloat("Near", &m_Near, 0.001f, 0.0001f, 10.0f, "%.5f");
 			ImGui::DragFloat("Far", &m_Far, 0.1f, 0.01f, 20000.0f);
-
 			if (ImGui::Button(u8"카메라 초기화")) {
 				m_FovDegree = s_initFov; m_Near = s_initNear; m_Far = s_initFar;
 			}
 		}
 
-		// 4) Lighting
-		if (ImGui::CollapsingHeader("Lighting"))
+		// === Lighting ===
+		if (ImGui::CollapsingHeader(u8"Lighting", ImGuiTreeNodeFlags_DefaultOpen))
 		{
 			ImGui::SliderAngle("Yaw", &m_LightYaw, -180.0f, 180.0f);
 			ImGui::SliderAngle("Pitch", &m_LightPitch, -89.0f, 89.0f);
 			ImGui::ColorEdit3("Color", (float*)&m_LightColor);
 			ImGui::SliderFloat("Intensity", &m_LightIntensity, 0.0f, 5.0f);
-
 			if (ImGui::Button(u8"조명 초기화")) {
 				m_LightColor = s_initLightColor;
 				m_LightYaw = s_initLightYaw;
@@ -948,17 +994,87 @@ void TutorialApp::UpdateImGUI()
 			}
 		}
 
-		// 5) Material (Blinn-Phong)
-		if (ImGui::CollapsingHeader("Material"))
+		// === Material (Blinn-Phong) ===
+		if (ImGui::CollapsingHeader(u8"Material", ImGuiTreeNodeFlags_DefaultOpen))
 		{
 			ImGui::ColorEdit3("I_a (ambient light)", (float*)&m_Ia);
 			ImGui::ColorEdit3("k_a (ambient refl.)", (float*)&m_Ka);
 			ImGui::SliderFloat("k_s (specular)", &m_Ks, 0.0f, 2.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
 			ImGui::SliderFloat("shininess", &m_Shininess, 2.0f, 256.0f, "%.0f");
-
-
 			if (ImGui::Button(u8"재질 초기화")) {
 				m_Ka = s_initKa; m_Ia = s_initIa; m_Ks = s_initKs; m_Shininess = s_initShin;
+			}
+		}
+
+		// === Models ===
+		if (ImGui::CollapsingHeader(u8"Models", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			auto ModelUI = [&](const char* name, XformUI& xf) {
+				if (ImGui::TreeNode(name)) {
+					ImGui::Checkbox("Enabled", &xf.enabled);
+					ImGui::DragFloat3("Position", (float*)&xf.pos, 0.1f, -10000.0f, 10000.0f);
+					ImGui::DragFloat3("Rotation (deg XYZ)", (float*)&xf.rotD, 0.5f, -720.0f, 720.0f);
+					ImGui::DragFloat3("Scale", (float*)&xf.scl, 0.01f, 0.0001f, 1000.0f);
+					if (ImGui::Button(u8"모델 초기화")) {
+						xf.pos = xf.initPos; xf.rotD = xf.initRotD; xf.scl = xf.initScl; xf.enabled = true;
+					}
+					ImGui::TreePop();
+				}
+				};
+
+			ModelUI("Tree", mTreeX);
+			ModelUI("Character", mCharX);
+			ModelUI("Zelda", mZeldaX);
+
+			// Debug Arrow — 다른 모델처럼 구성 (여기서 Enabled=showLightArrow)
+			// Models 섹션 안
+			if (ImGui::TreeNode(u8"Debug Arrow (라이트 방향 표시)")) {
+				ImGui::Checkbox("Enabled", &mDbg.showLightArrow);
+				ImGui::DragFloat3("Position", (float*)&m_ArrowPos, 0.1f, -10000.0f, 10000.0f);
+				ImGui::DragFloat3("Scale", (float*)&m_ArrowScale, 0.01f, 0.0001f, 1000.0f);
+				if (ImGui::Button(u8"화살표 초기화")) {
+					m_ArrowPos = s_initArrowPos;     // 스냅샷에 pos/scale만 남겨라
+					m_ArrowScale = s_initArrowScale;
+					mDbg.showLightArrow = true;
+				}
+				ImGui::TreePop();
+			}
+
+
+			if (ImGui::Button(u8"모든 모델 초기화")) {
+				for (XformUI* p : { &mTreeX, &mCharX, &mZeldaX }) {
+					p->pos = p->initPos; p->rotD = p->initRotD; p->scl = p->initScl; p->enabled = true;
+				}
+				m_ArrowPos = s_initArrowPos;
+				m_ArrowScale = s_initArrowScale;
+				mDbg.showLightArrow = true;
+			}
+		}
+
+		// === Toggles / Render Debug ===
+		if (ImGui::CollapsingHeader(u8"Toggles & Debug"))
+		{
+			ImGui::Checkbox("Show Skybox", &mDbg.showSky);
+			ImGui::Checkbox("Show Opaque", &mDbg.showOpaque);
+			ImGui::Checkbox("Show Transparent", &mDbg.showTransparent);		
+
+			ImGui::Separator();
+			ImGui::Checkbox("Wireframe", &mDbg.wireframe); ImGui::SameLine();
+			ImGui::Checkbox("Cull None", &mDbg.cullNone);
+			ImGui::Checkbox("Depth Write/Test OFF (mesh)", &mDbg.depthWriteOff);
+			//ImGui::Checkbox("Freeze Time", &mDbg.freezeTime);
+
+			ImGui::Separator();
+			ImGui::Text("Texture Map Overrides");
+			ImGui::Checkbox("Disable Normal", &mDbg.disableNormal);   ImGui::SameLine();
+			ImGui::Checkbox("Disable Specular", &mDbg.disableSpecular); ImGui::SameLine();
+			ImGui::Checkbox("Disable Emissive", &mDbg.disableEmissive);
+
+			ImGui::Checkbox("Force AlphaClip (test)", &mDbg.forceAlphaClip);
+			ImGui::DragFloat("alphaCut", &mDbg.alphaCut, 0.01f, 0.0f, 1.0f);
+
+			if (ImGui::Button(u8"디버그 토글 초기화")) {
+				mDbg = DebugToggles(); // 디폴트로 리셋
 			}
 		}
 	}
