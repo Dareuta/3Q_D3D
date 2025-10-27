@@ -15,7 +15,7 @@ public:
 	Matrix m_World;		// 임시카메라는 부모가 없으니 월드행렬로 바로 설정 
 	Vector3 m_InputVector;
 
-	float m_MoveSpeed = 20.0f;		
+	float m_MoveSpeed = 100.0f;		
 	float m_RotationSpeed = 0.004f;	// rad per sec
 
 	Vector3 GetForward();

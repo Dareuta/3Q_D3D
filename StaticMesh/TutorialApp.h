@@ -23,6 +23,7 @@ public:
 	using Vector3 = DirectX::SimpleMath::Vector3;
 	using Vector4 = DirectX::SimpleMath::Vector4;
 	using Matrix = DirectX::SimpleMath::Matrix;
+
 	/*
 	*	D3D 필수 4종.
 	*	Device: 리소스 생성용 팩토리.
@@ -30,6 +31,7 @@ public:
 	*	SwapChain: 백버퍼 교환.
 	*	RTV: 백버퍼를 렌더 타깃으로 쓰기 위한 뷰.
 	*/
+
 	//================================================================================================
 	// 렌더링 파이프라인을 구성하는 필수 객체의 인터페이스 (  뎊스 스텐실 뷰도 있지만 아직 사용하지 않는다.)
 	ID3D11Device* m_pDevice = nullptr;						// 디바이스
@@ -131,7 +133,7 @@ private:
 		DirectX::SimpleMath::Vector3 scl{ 1,1,1 };
 		// reset용 스냅샷
 		DirectX::SimpleMath::Vector3 initPos{ 0,0,0 }, initRotD{ 0,0,0 }, initScl{ 1,1,1 };
-		bool enabled = true; // 그 모델을 그릴지 토글
+		bool enabled = true; // 토글
 	};
 
 	struct DebugToggles {
@@ -141,14 +143,14 @@ private:
 		bool showLightArrow = true;
 
 		bool wireframe = false;
-		bool cullNone = false;   // 강제로 양면
-		bool depthWriteOff = false;   // 디버깅용(메쉬)
+		bool cullNone = true;   
+		bool depthWriteOff = false;   
 		bool freezeTime = false;
 
 		bool disableNormal = false;   // 맵 무효화(UseCB 오버라이드)
 		bool disableSpecular = false;
 		bool disableEmissive = false;
-		bool forceAlphaClip = false;   // 투명물도 클립 임시 테스트
+		bool forceAlphaClip = true;   
 		float alphaCut = 0.4f;    // 클립 기준
 	};
 

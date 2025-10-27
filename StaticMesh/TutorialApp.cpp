@@ -13,7 +13,7 @@
 #pragma comment (lib, "d3d11.lib")
 #pragma comment(lib,"d3dcompiler.lib")
 
-
+//================================================================================================
 
 // GPU가 기대하고 있는 메모리 레이아웃과 1대1로 대응해야한다
 struct ConstantBuffer // 상수버퍼
@@ -113,7 +113,7 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->RSSetState(m_pDbgRS);
 	}
 	else {
-		m_pDeviceContext->RSSetState(m_pCullBackRS); // ← 깔끔
+		m_pDeviceContext->RSSetState(m_pCullBackRS); 
 	}
 
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
@@ -200,11 +200,50 @@ void TutorialApp::OnRender()
 			}
 		};
 
+	auto DrawAlphaCutOnly = [&](StaticMesh& mesh,
+		const std::vector<MaterialGPU>& mtls,
+		const Matrix& world)
+		{
+			ConstantBuffer local = cb;
+			local.mWorld = XMMatrixTranspose(world);
+			local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
+			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
+
+			for (size_t i = 0; i < mesh.Ranges().size(); ++i)
+			{
+				const auto& r = mesh.Ranges()[i];
+				const auto& mat = mtls[r.materialIndex];
+
+				// opacity 맵 있는 서브메시만 컷아웃으로
+				if (!mat.hasOpacity) continue;
+
+				mat.Bind(m_pDeviceContext);
+
+				UseCB use{};
+				use.useDiffuse = mat.hasDiffuse ? 1u : 0u;
+				use.useNormal = (mat.hasNormal && !mDbg.disableNormal) ? 1u : 0u;
+				use.useSpecular = (!mDbg.disableSpecular) ? (mat.hasSpecular ? 1u : 2u) : 0u;
+				use.useEmissive = (mat.hasEmissive && !mDbg.disableEmissive) ? 1u : 0u;
+
+				use.useOpacity = 1u;              // opacity 텍스처 사용
+				use.alphaCut = mDbg.alphaCut;   // 컷 기준 활성화
+
+				m_pDeviceContext->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
+				m_pDeviceContext->PSSetConstantBuffers(2, 1, &m_pUseCB);
+
+				mesh.DrawSubmesh(m_pDeviceContext, i);
+				MaterialGPU::Unbind(m_pDeviceContext);
+			}
+		};
+
+
 	// ===== 람다: TRANSPARENT ONLY (잎 등 반투명만) =====
 	auto DrawTransparentOnly = [&](StaticMesh& mesh,
 		const std::vector<MaterialGPU>& mtls,
 		const Matrix& world)
 		{
+			if (mDbg.forceAlphaClip) return;
+
 			ConstantBuffer local = cb;
 			local.mWorld = XMMatrixTranspose(world);
 			local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
@@ -324,6 +363,21 @@ void TutorialApp::OnRender()
 	}
 	if (passRS) m_pDeviceContext->RSSetState(passRS);
 
+	// ===== B2) CUTOUT (alpha-test) =====
+	if (mDbg.forceAlphaClip) {
+		float bf[4] = { 0,0,0,0 };
+		m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF); // 블렌딩 OFF
+		m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0); // 깊이쓰기 ON
+				
+		if (mDbg.cullNone && m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS);
+
+		if (mDbg.showTransparent) {
+			if (mTreeX.enabled)  DrawAlphaCutOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
+			if (mCharX.enabled)  DrawAlphaCutOnly(gChar, gCharMtls, ComposeSRT(mCharX));
+			if (mZeldaX.enabled) DrawAlphaCutOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
+		}
+	}
+
 	// ===== C) TRANSPARENT =====
 	{
 		ID3D11BlendState* oldBS = nullptr; float oldBF[4]; UINT oldSM = 0xFFFFFFFF;
@@ -341,7 +395,6 @@ void TutorialApp::OnRender()
 			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Trans, 0);
 		}
 
-		// ★ 여기 있던 RSSetState(m_pDbgRS) 한 줄은 제거하세요 (이미 위에서 처리)
 		if (mDbg.showTransparent) {
 			if (mTreeX.enabled)  DrawTransparentOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
 			if (mCharX.enabled)  DrawTransparentOnly(gChar, gCharMtls, ComposeSRT(mCharX));
@@ -388,7 +441,7 @@ void TutorialApp::OnRender()
 		float bf[4] = { 0,0,0,0 };
 		m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
 		m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
-		if (m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS); // ★ 두꺼운 메시 양면
+		if (m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS); 
 
 		UINT stride = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT4);
 		UINT offset = 0;
@@ -500,7 +553,7 @@ bool TutorialApp::InitScene()
 			tip,                            // tip 1
 			COUNT
 		};
-		const float zEps = 0.05f; // 0.01~0.2 사이에서 취향대로
+		const float zEps = 0.05f; // 0.01~0.2 사이
 
 		V verts[COUNT] = {
 			// shaft back(z=0)
@@ -510,7 +563,7 @@ bool TutorialApp::InitScene()
 			{{-halfT,-halfT, shaftLen}, YELLOW}, {{+halfT,-halfT, shaftLen}, YELLOW},
 			{{+halfT,+halfT, shaftLen}, YELLOW}, {{-halfT,+halfT, shaftLen}, YELLOW},
 
-			
+
 			{{-headHalf,-headHalf, shaftLen}, YELLOW},
 			{{+headHalf,-headHalf, shaftLen}, YELLOW},
 			{{+headHalf,+headHalf, shaftLen}, YELLOW},
@@ -520,22 +573,16 @@ bool TutorialApp::InitScene()
 			{{0,0, shaftLen + headLen}, YELLOW},
 		};
 
-		// CW/CCW 신경 안 쓰게 CullNone로 렌더할 거라 인덱스는 보기 좋게만 구성
-		uint16_t idx[] = {
-			// shaft back face (z=0)
-			s0,s2,s1,  s0,s3,s2,
-			// shaft sides (front cap은 빼서 z-파이팅 방지)
-			// bottom (y=-halfT)
-			s0,s1,s5,  s0,s5,s4,
-			// right (x=+halfT)
-			s1,s2,s6,  s1,s6,s5,
-			// top (y=+halfT)
-			s3,s7,s6,  s3,s6,s2,
-			// left (x=-halfT)
+		
+		uint16_t idx[] = {	
+			s0,s2,s1,  s0,s3,s2,		
+			s0,s1,s5,  s0,s5,s4,		
+			s1,s2,s6,  s1,s6,s5,			
+			s3,s7,s6,  s3,s6,s2,			
 			s0,s4,s7,  s0,s7,s3,
 
-			// head base cap (닫아줌)
-			h2,h1,h0,  
+			// head base cap
+			h2,h1,h0,
 			h3,h2,h0,
 			// head sides
 			h0,h1,tip,
@@ -561,7 +608,7 @@ bool TutorialApp::InitScene()
 		HR_T(m_pDevice->CreateBuffer(&ibd, &iinit, &m_pArrowIB));
 	}
 
-	// ===== 초기 트랜스폼 스냅샷(원하면 초기 위치 바꿔라) =====
+	// ===== 초기 트랜스폼 스냅샷 =====
 	mTreeX.pos = { -100, -150, 100 };  mTreeX.initPos = mTreeX.pos;
 	mTreeX.scl = { 100,100,100 };
 	mCharX.pos = { 100, -150, 100 };  mCharX.initPos = mCharX.pos;
@@ -637,16 +684,14 @@ bool TutorialApp::InitScene()
 					mtls[i].Build(m_pDevice, cpu.materials[i], texDir);
 				}
 			};
-
-		// 과제 명세: tree( diffuse, opacity ), character( diffuse, normal, specular, emissive ), zelda( diffuse, opacity )
-		// 경로는 네 프로젝트 구조에 맞게 조정해줘.
+				
 		BuildAll(L"../Resource/Tree/Tree.fbx", L"../Resource/Tree/", gTree, gTreeMtls);
 		BuildAll(L"../Resource/Character/Character.fbx", L"../Resource/Character/", gChar, gCharMtls);
 		BuildAll(L"../Resource/Zelda/zeldaPosed001.fbx", L"../Resource/Zelda/", gZelda, gZeldaMtls);
 	}
 	// === Rasterizer states ===
 	{
-		// BACK 컬 (기본)
+		// BACK CULL (기본)
 		D3D11_RASTERIZER_DESC rsBack{};
 		rsBack.FillMode = D3D11_FILL_SOLID;
 		rsBack.CullMode = D3D11_CULL_BACK;
@@ -654,13 +699,13 @@ bool TutorialApp::InitScene()
 		rsBack.DepthClipEnable = TRUE;
 		HR_T(m_pDevice->CreateRasterizerState(&rsBack, &m_pCullBackRS));
 
-		// SOLID + Cull None (양면)  ← ★ 새로 추가
+		// SOLID + Cull None (양면) 
 		D3D11_RASTERIZER_DESC rsNone{};
 		rsNone.FillMode = D3D11_FILL_SOLID;
 		rsNone.CullMode = D3D11_CULL_NONE;
 		rsNone.FrontCounterClockwise = FALSE;
 		rsNone.DepthClipEnable = TRUE;
-		HR_T(m_pDevice->CreateRasterizerState(&rsNone, &m_pDbgRS)); // 이름 유지해도 되고 m_pCullNoneRS로 바꿔도 됨
+		HR_T(m_pDevice->CreateRasterizerState(&rsNone, &m_pDbgRS)); 
 
 		// 와이어프레임 + Cull None
 		D3D11_RASTERIZER_DESC rw{};
@@ -700,13 +745,13 @@ bool TutorialApp::InitScene()
 	//======================  SKYBOX: Geometry (unit cube)  ======================
 	{
 		struct SkyV { DirectX::XMFLOAT3 pos; };
-		// 단위 큐브(센터 원점). 내부에서 보도록 FRONT 컬링 예정
+
 		const SkyV v[] = {
 			{{-1,-1,-1}}, {{-1,+1,-1}}, {{+1,+1,-1}}, {{+1,-1,-1}}, // back (z-)
 			{{-1,-1,+1}}, {{-1,+1,+1}}, {{+1,+1,+1}}, {{+1,-1,+1}}, // front (z+)
 		};
 		const uint16_t idx[] = {
-			// 각 면 CCW (밖을 향함). 우리는 Cull FRONT라 내부면이 렌더됨.
+			// 각 면 CCW (밖을 향함). Cull FRONT라 내부면이 렌더됨.
 			0,1,2, 0,2,3, // back
 			4,6,5, 4,7,6, // front
 			4,5,1, 4,1,0, // left
@@ -732,9 +777,8 @@ bool TutorialApp::InitScene()
 
 	//======================  SKYBOX: Texture / Sampler  ======================
 	{
-		// Hanako.dds 경로는 네 프로젝트 구조에 맞게 조정
 		HR_T(CreateDDSTextureFromFile(m_pDevice,
-			L"../Resource/Hanako.dds", nullptr, &m_pSkySRV));
+			L"../Resource/Cubemap.dds", nullptr, &m_pSkySRV));
 
 		D3D11_SAMPLER_DESC sd{}; // clamp가 세렝게티
 		sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -745,7 +789,7 @@ bool TutorialApp::InitScene()
 
 	//======================  SKYBOX: Depth/Raster states  ======================
 	{
-		// depth write 끄고, LEQUAL (네가 기본 dss를 LEQUAL로 써도, sky는 write=ZERO가 핵심)
+		// depth write 끄고, LEQUAL(sky는 write=ZERO가 핵심)
 		D3D11_DEPTH_STENCIL_DESC sd{};
 		sd.DepthEnable = TRUE;
 		sd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
@@ -774,7 +818,7 @@ bool TutorialApp::InitScene()
 		// Transparent: 깊이쓰기 OFF
 		D3D11_DEPTH_STENCIL_DESC dsT{};
 		dsT.DepthEnable = TRUE;
-		dsT.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO; // **핵심**
+		dsT.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO; // 이게 그 중요한 그거임
 		dsT.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
 		HR_T(m_pDevice->CreateDepthStencilState(&dsT, &m_pDSS_Trans));
 
@@ -913,6 +957,11 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pWireRS);
 	SAFE_RELEASE(m_pCullBackRS);
 	SAFE_RELEASE(m_pDSS_Disabled);
+
+	SAFE_RELEASE(m_pBS_Alpha);
+	SAFE_RELEASE(m_pDSS_Opaque);
+	SAFE_RELEASE(m_pDSS_Trans);
+	//머가 이리 많음
 }
 
 void TutorialApp::UninitD3D()
@@ -969,7 +1018,7 @@ void TutorialApp::UpdateImGUI()
 		// 스냅샷 1회 저장
 		static bool s_inited = false;
 		static Vector3 s_initCubePos{}, s_initCubeScale{};
-		static float   s_initSpin = 0.0f, s_initFov = 60.0f, s_initNear = 0.001f, s_initFar = 1.0f;
+		static float   s_initSpin = 0.0f, s_initFov = 60.0f, s_initNear = 0.1f, s_initFar = 1.0f;
 		static Vector3 s_initLightColor{};
 		static float   s_initLightYaw = 0.0f, s_initLightPitch = 0.0f, s_initLightIntensity = 1.0f;
 		static Vector3 s_initKa{}, s_initIa{};
@@ -1042,20 +1091,18 @@ void TutorialApp::UpdateImGUI()
 			ModelUI("Character", mCharX);
 			ModelUI("Zelda", mZeldaX);
 
-			// Debug Arrow — 다른 모델처럼 구성 (여기서 Enabled=showLightArrow)
-			// Models 섹션 안
-			if (ImGui::TreeNode(u8"Debug Arrow (라이트 방향 표시)")) {
+			// Models 
+			if (ImGui::TreeNode(u8"Debug Arrow (라이트 방향)")) {
 				ImGui::Checkbox("Enabled", &mDbg.showLightArrow);
 				ImGui::DragFloat3("Position", (float*)&m_ArrowPos, 0.1f, -10000.0f, 10000.0f);
 				ImGui::DragFloat3("Scale", (float*)&m_ArrowScale, 0.01f, 0.0001f, 1000.0f);
 				if (ImGui::Button(u8"화살표 초기화")) {
-					m_ArrowPos = s_initArrowPos;     // 스냅샷에 pos/scale만 남겨라
+					m_ArrowPos = s_initArrowPos;     
 					m_ArrowScale = s_initArrowScale;
 					mDbg.showLightArrow = true;
 				}
 				ImGui::TreePop();
 			}
-
 
 			if (ImGui::Button(u8"모든 모델 초기화")) {
 				for (XformUI* p : { &mTreeX, &mCharX, &mZeldaX }) {
@@ -1072,7 +1119,7 @@ void TutorialApp::UpdateImGUI()
 		{
 			ImGui::Checkbox("Show Skybox", &mDbg.showSky);
 			ImGui::Checkbox("Show Opaque", &mDbg.showOpaque);
-			ImGui::Checkbox("Show Transparent", &mDbg.showTransparent);		
+			ImGui::Checkbox("Show Transparent", &mDbg.showTransparent);
 
 			ImGui::Separator();
 			ImGui::Checkbox("Wireframe", &mDbg.wireframe); ImGui::SameLine();
@@ -1086,11 +1133,11 @@ void TutorialApp::UpdateImGUI()
 			ImGui::Checkbox("Disable Specular", &mDbg.disableSpecular); ImGui::SameLine();
 			ImGui::Checkbox("Disable Emissive", &mDbg.disableEmissive);
 
-			ImGui::Checkbox("Force AlphaClip (test)", &mDbg.forceAlphaClip);
+			ImGui::Checkbox("Force AlphaClip", &mDbg.forceAlphaClip);
 			ImGui::DragFloat("alphaCut", &mDbg.alphaCut, 0.01f, 0.0f, 1.0f);
 
 			if (ImGui::Button(u8"디버그 토글 초기화")) {
-				mDbg = DebugToggles(); // 디폴트로 리셋
+				mDbg = DebugToggles(); // 리셋
 			}
 		}
 	}
