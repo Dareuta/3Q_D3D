@@ -51,6 +51,9 @@ public:
 	ID3D11DepthStencilState* m_pSkyDSS = nullptr; // Depth write OFF, LEQUAL
 	ID3D11RasterizerState* m_pSkyRS = nullptr; // Cull FRONT (내부가 보이게)
 	//================================================================================================
+	ID3D11BlendState* m_pBS_Alpha = nullptr; // straight alpha
+	ID3D11DepthStencilState* m_pDSS_Opaque = nullptr; // depth write ON
+	ID3D11DepthStencilState* m_pDSS_Trans = nullptr; // depth write OFF
 			
 	XMMATRIX m_World;
 

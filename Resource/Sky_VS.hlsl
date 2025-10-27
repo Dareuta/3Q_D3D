@@ -16,7 +16,7 @@ VS_OUT main(VS_IN i)
     float4 clip = mul(mul(p, View), Projection);
     clip.z = clip.w;              
     o.SvPos = clip;
-    o.Dir = mul((float3x3)View, i.Pos);
+    o.Dir = i.Pos;
 
     return o;
 }

@@ -90,46 +90,42 @@ void TutorialApp::OnUpdate()
 
 void TutorialApp::OnRender()
 {
-	m_pDeviceContext->RSSetState(m_pNoCullRS);
-	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
-	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
-
+	// ===== 기본 프로젝션/클리어 =====
 	if (m_FovDegree < 10.0f)      m_FovDegree = 10.0f;
 	else if (m_FovDegree > 120.0f) m_FovDegree = 120.0f;
-
-	// 최소값 보장
 	if (m_Near < 0.0001f) m_Near = 0.0001f;
-
-	// Near보다 약간 더 크게
 	float minFar = m_Near + 0.001f;
 	if (m_Far < minFar) m_Far = minFar;
 
 	float aspect = m_ClientWidth / (float)m_ClientHeight;
+
+	m_pDeviceContext->RSSetState(m_pNoCullRS);
+	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
+	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+
 	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
 
-	// ===== 1) 파이프라인 셋업 =====
+	// ===== 파이프라인 셋업(메쉬 셰이더) =====
 	m_pDeviceContext->IASetInputLayout(m_pMeshIL);
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	m_pDeviceContext->VSSetShader(m_pMeshVS, nullptr, 0);
 	m_pDeviceContext->PSSetShader(m_pMeshPS, nullptr, 0);
 	if (m_pSamplerLinear) m_pDeviceContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
 
-	// ===== 2) 공통 CB0(뷰/프로젝션/라이트) + b1(카메라/재질) =====
-	Matrix view;
+	// ===== 공통 CB0(뷰/프로젝션/라이트) + b1(카메라/재질) =====
+	Matrix view; m_Camera.GetViewMatrix(view);
+	Matrix viewNoTrans = view; viewNoTrans._41 = viewNoTrans._42 = viewNoTrans._43 = 0.0f;
+
 	ConstantBuffer cb{};
-	m_Camera.GetViewMatrix(view);
 	cb.mView = XMMatrixTranspose(view);
 	cb.mProjection = XMMatrixTranspose(m_Projection);
+	cb.mWorld = XMMatrixTranspose(Matrix::Identity);
+	cb.mWorldInvTranspose = XMMatrixInverse(nullptr, Matrix::Identity);
 
 	XMMATRIX R = XMMatrixRotationRollPitchYaw(m_LightPitch, m_LightYaw, 0.0f);
 	XMVECTOR base = XMVector3Normalize(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f));
 	XMVECTOR L = XMVector3Normalize(XMVector3TransformNormal(base, R));
 	Vector3 dir = { XMVectorGetX(L), XMVectorGetY(L), XMVectorGetZ(L) };
-
-	auto world = m_World;
-	cb.mWorld = XMMatrixTranspose(Matrix::Identity);        // 개별 드로우에서 바꿔치기
-
-	cb.mWorldInvTranspose = XMMatrixInverse(nullptr, Matrix::Identity);
 	cb.vLightDir = Vector4(dir.x, dir.y, dir.z, 0.0f);
 	cb.vLightColor = Vector4(m_LightColor.x * m_LightIntensity, m_LightColor.y * m_LightIntensity, m_LightColor.z * m_LightIntensity, 1.0f);
 
@@ -137,63 +133,89 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 	m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 
-	// b1: 카메라/재질 파라미터 (헤더 멤버: m_Ka, m_Ks, m_Shininess, m_Ia)
 	BlinnPhongCB bp{};
 	const Vector3 eye = m_Camera.m_World.Translation();
 	bp.EyePosW = Vector4(eye.x, eye.y, eye.z, 1.0f);
 	bp.kA = Vector4(m_Ka.x, m_Ka.y, m_Ka.z, 0.0f);
 	bp.kSAlpha = Vector4(m_Ks, m_Shininess, 0.0f, 0.0f);
 	bp.I_ambient = Vector4(m_Ia.x, m_Ia.y, m_Ia.z, 0.0f);
-
 	m_pDeviceContext->UpdateSubresource(m_pBlinnCB, 0, nullptr, &bp, 0, 0);
 	m_pDeviceContext->PSSetConstantBuffers(1, 1, &m_pBlinnCB);
 
-	// ===== 3) 드로우 람다 (서브메시별 머티리얼 바인딩 + b2 USE 플래그) =====
-	auto DrawModel = [&](StaticMesh& mesh,
+	// ===== 람다: OPAQUE ONLY (트렁크 등 불투명만) =====
+	auto DrawOpaqueOnly = [&](StaticMesh& mesh,
 		const std::vector<MaterialGPU>& mtls,
 		const Matrix& world)
 		{
-			// CB0: 월드만 바꿔서 다시 업로드
 			ConstantBuffer local = cb;
 			local.mWorld = XMMatrixTranspose(world);
 			local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
 			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 
-			// 서브메시 루프
 			for (size_t i = 0; i < mesh.Ranges().size(); ++i)
 			{
 				const auto& r = mesh.Ranges()[i];
 				const auto& mat = mtls[r.materialIndex];
 
-				// t0..t4 : Diffuse, Normal, Specular, Emissive, Opacity
-				mat.Bind(m_pDeviceContext);
+				// 불투명만 (opacity 텍스처가 있는 잎은 제외)
+				if (mat.hasOpacity) continue;
 
+				mat.Bind(m_pDeviceContext);
 
 				UseCB use{};
 				use.useDiffuse = mat.hasDiffuse ? 1u : 0u;
 				use.useNormal = mat.hasNormal ? 1u : 0u;
 				use.useSpecular = mat.hasSpecular ? 1u : 0u;
 				use.useEmissive = mat.hasEmissive ? 1u : 0u;
-				use.useOpacity = mat.hasOpacity ? 1u : 0u;
-				use.alphaCut = mat.hasOpacity ? 0.5f : -1.0f; // ★ 핵심
+				use.useOpacity = 0u;       // 불투명
+				use.alphaCut = -1.0f;    // clip 안함
 
 				m_pDeviceContext->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
 				m_pDeviceContext->PSSetConstantBuffers(2, 1, &m_pUseCB);
 
-				// 실제 드로우
 				mesh.DrawSubmesh(m_pDeviceContext, i);
-
-				// SRV 언바인드(디버그 런타임 경고 방지 습관)
 				MaterialGPU::Unbind(m_pDeviceContext);
 			}
 		};
 
-	// Draw
-	DrawModel(gTree, gTreeMtls, Matrix::CreateTranslation(0, 0, -10));
-	DrawModel(gChar, gCharMtls, Matrix::CreateTranslation(0, 0, -20));
-	DrawModel(gZelda, gZeldaMtls, Matrix::CreateTranslation(10, 0, -20));
+	// ===== 람다: TRANSPARENT ONLY (잎 등 반투명만) =====
+	auto DrawTransparentOnly = [&](StaticMesh& mesh,
+		const std::vector<MaterialGPU>& mtls,
+		const Matrix& world)
+		{
+			ConstantBuffer local = cb;
+			local.mWorld = XMMatrixTranspose(world);
+			local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
+			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 
-	// ====== SKYBOX PASS (draw last) ======
+			// (간단 버전: 정렬 없이 렌더. 필요하면 뒤→앞 정렬 추가)
+			for (size_t i = 0; i < mesh.Ranges().size(); ++i)
+			{
+				const auto& r = mesh.Ranges()[i];
+				const auto& mat = mtls[r.materialIndex];
+
+				// 반투명만 (opacity 텍스처 있는 서브메시)
+				if (!mat.hasOpacity) continue;
+
+				mat.Bind(m_pDeviceContext);
+
+				UseCB use{};
+				use.useDiffuse = mat.hasDiffuse ? 1u : 0u;
+				use.useNormal = mat.hasNormal ? 1u : 0u;
+				use.useSpecular = mat.hasSpecular ? 1u : 0u;
+				use.useEmissive = mat.hasEmissive ? 1u : 0u;
+				use.useOpacity = 1u;       // 반드시 On
+				use.alphaCut = -1.0f;    // clip 비활성 → 블렌딩
+
+				m_pDeviceContext->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
+				m_pDeviceContext->PSSetConstantBuffers(2, 1, &m_pUseCB);
+
+				mesh.DrawSubmesh(m_pDeviceContext, i);
+				MaterialGPU::Unbind(m_pDeviceContext);
+			}
+		};
+
+	// ===== A) SKYBOX FIRST =====
 	{
 		// RS/OM 상태 백업
 		ID3D11RasterizerState* oldRS = nullptr;
@@ -201,38 +223,27 @@ void TutorialApp::OnRender()
 		ID3D11DepthStencilState* oldDSS = nullptr; UINT oldStencilRef = 0;
 		m_pDeviceContext->OMGetDepthStencilState(&oldDSS, &oldStencilRef);
 
-		// 파이프라인 셋업		
 		m_pDeviceContext->RSSetState(m_pSkyRS);
-		//m_pDeviceContext->RSSetState(nullptr);
 		m_pDeviceContext->OMSetDepthStencilState(m_pSkyDSS, 0);
 
 		m_pDeviceContext->IASetInputLayout(m_pSkyIL);
 		m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
 		m_pDeviceContext->VSSetShader(m_pSkyVS, nullptr, 0);
 		m_pDeviceContext->PSSetShader(m_pSkyPS, nullptr, 0);
 
-		// CB0 업데이트: view에서 translation 제거
-		Matrix view; m_Camera.GetViewMatrix(view);
-		Matrix viewRot = view;
-		viewRot._41 = viewRot._42 = viewRot._43 = 0.0f; // SimpleMath Matrix는 행렬 멤버 직접 접근 가능
-
-		ConstantBuffer skyCB = {};
+		ConstantBuffer skyCB{};
 		skyCB.mWorld = XMMatrixTranspose(Matrix::Identity);
-		skyCB.mView = XMMatrixTranspose(viewRot);
+		skyCB.mView = XMMatrixTranspose(viewNoTrans);
 		skyCB.mProjection = XMMatrixTranspose(m_Projection);
-		skyCB.mWorldInvTranspose = XMMatrixTranspose(Matrix::Identity); // 안 씀
+		skyCB.mWorldInvTranspose = XMMatrixTranspose(Matrix::Identity);
 		skyCB.vLightDir = Vector4(0, 0, 0, 0);
 		skyCB.vLightColor = Vector4(0, 0, 0, 0);
-
 		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &skyCB, 0, 0);
 		m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 
-		// 텍스처 바인딩 (Sky_PS.hlsl: TextureCube t0, Sampler s0 가정)
 		m_pDeviceContext->PSSetShaderResources(0, 1, &m_pSkySRV);
 		m_pDeviceContext->PSSetSamplers(0, 1, &m_pSkySampler);
 
-		// VB/IB 바인딩 후 드로우
 		UINT stride = sizeof(DirectX::XMFLOAT3);
 		UINT offset = 0;
 		ID3D11Buffer* vbs[] = { m_pSkyVB };
@@ -240,22 +251,62 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->IASetIndexBuffer(m_pSkyIB, DXGI_FORMAT_R16_UINT, 0);
 		m_pDeviceContext->DrawIndexed(36, 0, 0);
 
-		// SRV 언바인드 (디버그 경고 예방)
 		ID3D11ShaderResourceView* nullSRV[1] = { nullptr };
 		m_pDeviceContext->PSSetShaderResources(0, 1, nullSRV);
-
-		// 상태 복원
 		m_pDeviceContext->RSSetState(oldRS);
 		m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldStencilRef);
 		SAFE_RELEASE(oldRS);
 		SAFE_RELEASE(oldDSS);
 	}
+	// 스카이박스 후 메쉬 파이프라인 복구
+	m_pDeviceContext->IASetInputLayout(m_pMeshIL);
+	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	m_pDeviceContext->VSSetShader(m_pMeshVS, nullptr, 0);
+	m_pDeviceContext->PSSetShader(m_pMeshPS, nullptr, 0);
+	if (m_pSamplerLinear) m_pDeviceContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
 
+	// ===== B) OPAQUE (트렁크 등) =====
+	{
+		float bf[4] = { 0,0,0,0 };
+		m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
+		m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
+
+		// 트렁크(불투명)만
+		DrawOpaqueOnly(gTree, gTreeMtls, Matrix::CreateTranslation(0, 0, -10));
+		// DrawOpaqueOnly(gChar,  gCharMtls,  Matrix::CreateTranslation(0,0,-20));
+		// DrawOpaqueOnly(gZelda, gZeldaMtls, Matrix::CreateTranslation(10,0,-20));
+	}
+
+	// ===== C) TRANSPARENT (잎 등 반투명) =====
+	{
+		// 상태 백업(선택)
+		ID3D11BlendState* oldBS = nullptr; float oldBF[4]; UINT oldSM = 0xFFFFFFFF;
+		m_pDeviceContext->OMGetBlendState(&oldBS, oldBF, &oldSM);
+		ID3D11DepthStencilState* oldDSS = nullptr; UINT oldSR = 0;
+		m_pDeviceContext->OMGetDepthStencilState(&oldDSS, &oldSR);
+
+		float bf[4] = { 0,0,0,0 };
+		m_pDeviceContext->OMSetBlendState(m_pBS_Alpha, bf, 0xFFFFFFFF);
+		m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Trans, 0);
+
+		// 얇은 잎은 양면 필요시 Cull None(이미 전체 NoCull이면 생략)
+		m_pDeviceContext->RSSetState(m_pNoCullRS);
+
+		// 잎(반투명)만
+		DrawTransparentOnly(gTree, gTreeMtls, Matrix::CreateTranslation(0, 0, -10));
+		// DrawTransparentOnly(gChar,  gCharMtls,  Matrix::CreateTranslation(0,0,-20));
+		// DrawTransparentOnly(gZelda, gZeldaMtls, Matrix::CreateTranslation(10,0,-20));
+
+		// 상태 복원(선택)
+		m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
+		m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldSR);
+		SAFE_RELEASE(oldBS);
+		SAFE_RELEASE(oldDSS);
+	}
 
 #ifdef _DEBUG
 	UpdateImGUI();
 #endif
-
 	m_pSwapChain->Present(1, 0);
 }
 
@@ -446,6 +497,37 @@ bool TutorialApp::InitScene()
 		HR_T(m_pDevice->CreateRasterizerState(&rs, &m_pSkyRS));
 
 	}
+
+	//======================  ALPHA BLEND / DEPTH STATES  ======================
+	{
+		// Opaque: 깊이쓰기 ON
+		D3D11_DEPTH_STENCIL_DESC dsO{};
+		dsO.DepthEnable = TRUE;
+		dsO.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+		dsO.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+		HR_T(m_pDevice->CreateDepthStencilState(&dsO, &m_pDSS_Opaque));
+
+		// Transparent: 깊이쓰기 OFF
+		D3D11_DEPTH_STENCIL_DESC dsT{};
+		dsT.DepthEnable = TRUE;
+		dsT.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO; // **핵심**
+		dsT.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+		HR_T(m_pDevice->CreateDepthStencilState(&dsT, &m_pDSS_Trans));
+
+		// Straight Alpha: Src*SrcA + Dst*(1-SrcA)
+		D3D11_BLEND_DESC bd{};
+		auto& rt = bd.RenderTarget[0];
+		rt.BlendEnable = TRUE;
+		rt.SrcBlend = D3D11_BLEND_SRC_ALPHA;
+		rt.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+		rt.BlendOp = D3D11_BLEND_OP_ADD;
+		rt.SrcBlendAlpha = D3D11_BLEND_ONE;
+		rt.DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+		rt.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+		rt.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+		HR_T(m_pDevice->CreateBlendState(&bd, &m_pBS_Alpha));
+	}
+
 
 	return true;
 }
