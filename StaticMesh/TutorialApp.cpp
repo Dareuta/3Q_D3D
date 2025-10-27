@@ -36,7 +36,8 @@ struct BlinnPhongCB
 };
 
 
-struct UseCB {
+struct UseCB 
+{
 	UINT  useDiffuse, useNormal, useSpecular, useEmissive;
 	UINT  useOpacity;
 	float alphaCut;
@@ -60,7 +61,6 @@ bool TutorialApp::OnInitialize()
 }
 
 void TutorialApp::OnUninitialize()
-
 {
 	UninitScene();
 
