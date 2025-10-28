@@ -36,7 +36,7 @@ struct BlinnPhongCB
 };
 
 
-struct UseCB 
+struct UseCB
 {
 	UINT  useDiffuse, useNormal, useSpecular, useEmissive;
 	UINT  useOpacity;
@@ -113,7 +113,7 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->RSSetState(m_pDbgRS);
 	}
 	else {
-		m_pDeviceContext->RSSetState(m_pCullBackRS); 
+		m_pDeviceContext->RSSetState(m_pCullBackRS);
 	}
 
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
@@ -346,6 +346,7 @@ void TutorialApp::OnRender()
 			if (mTreeX.enabled)  DrawOpaqueOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
 			if (mCharX.enabled)  DrawOpaqueOnly(gChar, gCharMtls, ComposeSRT(mCharX));
 			if (mZeldaX.enabled) DrawOpaqueOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
+			DrawOpaqueOnly(gBoxHuman, gBoxMtls, ComposeSRT(mBoxX));
 		}
 	}
 
@@ -368,13 +369,14 @@ void TutorialApp::OnRender()
 		float bf[4] = { 0,0,0,0 };
 		m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF); // 블렌딩 OFF
 		m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0); // 깊이쓰기 ON
-				
+
 		if (mDbg.cullNone && m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS);
 
 		if (mDbg.showTransparent) {
 			if (mTreeX.enabled)  DrawAlphaCutOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
 			if (mCharX.enabled)  DrawAlphaCutOnly(gChar, gCharMtls, ComposeSRT(mCharX));
 			if (mZeldaX.enabled) DrawAlphaCutOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
+			DrawAlphaCutOnly(gBoxHuman, gBoxMtls, ComposeSRT(mBoxX));
 		}
 	}
 
@@ -399,6 +401,7 @@ void TutorialApp::OnRender()
 			if (mTreeX.enabled)  DrawTransparentOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
 			if (mCharX.enabled)  DrawTransparentOnly(gChar, gCharMtls, ComposeSRT(mCharX));
 			if (mZeldaX.enabled) DrawTransparentOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
+			DrawTransparentOnly(gBoxHuman, gBoxMtls, ComposeSRT(mBoxX));
 		}
 
 		m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
@@ -441,7 +444,7 @@ void TutorialApp::OnRender()
 		float bf[4] = { 0,0,0,0 };
 		m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
 		m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
-		if (m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS); 
+		if (m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS);
 
 		UINT stride = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT4);
 		UINT offset = 0;
@@ -573,12 +576,12 @@ bool TutorialApp::InitScene()
 			{{0,0, shaftLen + headLen}, YELLOW},
 		};
 
-		
-		uint16_t idx[] = {	
-			s0,s2,s1,  s0,s3,s2,		
-			s0,s1,s5,  s0,s5,s4,		
-			s1,s2,s6,  s1,s6,s5,			
-			s3,s7,s6,  s3,s6,s2,			
+
+		uint16_t idx[] = {
+			s0,s2,s1,  s0,s3,s2,
+			s0,s1,s5,  s0,s5,s4,
+			s1,s2,s6,  s1,s6,s5,
+			s3,s7,s6,  s3,s6,s2,
 			s0,s4,s7,  s0,s7,s3,
 
 			// head base cap
@@ -614,9 +617,12 @@ bool TutorialApp::InitScene()
 	mCharX.pos = { 100, -150, 100 };  mCharX.initPos = mCharX.pos;
 	mZeldaX.pos = { 0, -150, 250 };  mZeldaX.initPos = mZeldaX.pos;
 
+	mTreeX.enabled = mCharX.enabled = mZeldaX.enabled = false; // 초기 설정 숨기기
+
 	mTreeX.initScl = mTreeX.scl; mCharX.initScl = mCharX.scl; mZeldaX.initScl = mZeldaX.scl;
 	mTreeX.initRotD = mTreeX.rotD; mCharX.initRotD = mCharX.rotD; mZeldaX.initRotD = mZeldaX.rotD;
 
+	mBoxX.initScl = mBoxX.scl;	mBoxX.initRotD = mBoxX.rotD;
 	// PS b3: dbgColor
 	{
 		D3D11_BUFFER_DESC bd{};
@@ -684,10 +690,11 @@ bool TutorialApp::InitScene()
 					mtls[i].Build(m_pDevice, cpu.materials[i], texDir);
 				}
 			};
-				
+
 		BuildAll(L"../Resource/Tree/Tree.fbx", L"../Resource/Tree/", gTree, gTreeMtls);
 		BuildAll(L"../Resource/Character/Character.fbx", L"../Resource/Character/", gChar, gCharMtls);
 		BuildAll(L"../Resource/Zelda/zeldaPosed001.fbx", L"../Resource/Zelda/", gZelda, gZeldaMtls);
+		BuildAll(L"../Resource/BoxHuman/BoxHuman.fbx", L"../Resource/BoxHuman/", gBoxHuman, gBoxMtls);
 	}
 	// === Rasterizer states ===
 	{
@@ -705,7 +712,7 @@ bool TutorialApp::InitScene()
 		rsNone.CullMode = D3D11_CULL_NONE;
 		rsNone.FrontCounterClockwise = FALSE;
 		rsNone.DepthClipEnable = TRUE;
-		HR_T(m_pDevice->CreateRasterizerState(&rsNone, &m_pDbgRS)); 
+		HR_T(m_pDevice->CreateRasterizerState(&rsNone, &m_pDbgRS));
 
 		// 와이어프레임 + Cull None
 		D3D11_RASTERIZER_DESC rw{};
@@ -728,7 +735,7 @@ bool TutorialApp::InitScene()
 		ID3D10Blob* vsb = nullptr;
 		HR_T(CompileShaderFromFile(L"../Resource/Sky_VS.hlsl", "main", "vs_5_0", &vsb));
 		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pSkyVS));
-
+		
 		// Sky VS는 position-only( float3 POSITION ) 기준
 		D3D11_INPUT_ELEMENT_DESC il[] = {
 			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
@@ -778,7 +785,7 @@ bool TutorialApp::InitScene()
 	//======================  SKYBOX: Texture / Sampler  ======================
 	{
 		HR_T(CreateDDSTextureFromFile(m_pDevice,
-			L"../Resource/Cubemap.dds", nullptr, &m_pSkySRV));
+			L"../Resource/Hanako.dds", nullptr, &m_pSkySRV));
 
 		D3D11_SAMPLER_DESC sd{}; // clamp가 세렝게티
 		sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -1097,7 +1104,7 @@ void TutorialApp::UpdateImGUI()
 				ImGui::DragFloat3("Position", (float*)&m_ArrowPos, 0.1f, -10000.0f, 10000.0f);
 				ImGui::DragFloat3("Scale", (float*)&m_ArrowScale, 0.01f, 0.0001f, 1000.0f);
 				if (ImGui::Button(u8"화살표 초기화")) {
-					m_ArrowPos = s_initArrowPos;     
+					m_ArrowPos = s_initArrowPos;
 					m_ArrowScale = s_initArrowScale;
 					mDbg.showLightArrow = true;
 				}

@@ -94,6 +94,9 @@ private:
     StaticMesh              gTree, gChar, gZelda;
     std::vector<MaterialGPU> gTreeMtls, gCharMtls, gZeldaMtls;
 
+    StaticMesh gBoxHuman;
+    std::vector<MaterialGPU> gBoxMtls;
+
     // ===== 디버그 화살표 =====
     ID3D11VertexShader* m_pDbgVS = nullptr;
     ID3D11PixelShader* m_pDbgPS = nullptr;
@@ -168,6 +171,7 @@ private:
     float   m_Shininess = 64.0f;
 
     XformUI     mTreeX, mCharX, mZeldaX;
+    XformUI     mBoxX;
     DebugToggles mDbg;
 
     // 디버그 화살표 위치/스케일
