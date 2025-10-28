@@ -686,13 +686,14 @@ bool TutorialApp::InitScene()
 	mTreeX.scl = { 100,100,100 };
 	mCharX.pos = { 100, -150, 100 };  mCharX.initPos = mCharX.pos;
 	mZeldaX.pos = { 0, -150, 250 };  mZeldaX.initPos = mZeldaX.pos;
+	mBoxX.pos = { 0, -300, 500 };
 
 	mTreeX.enabled = mCharX.enabled = mZeldaX.enabled = false; // 초기 설정 숨기기
 
 	mTreeX.initScl = mTreeX.scl; mCharX.initScl = mCharX.scl; mZeldaX.initScl = mZeldaX.scl;
 	mTreeX.initRotD = mTreeX.rotD; mCharX.initRotD = mCharX.rotD; mZeldaX.initRotD = mZeldaX.rotD;
 
-	mBoxX.initScl = mBoxX.scl;	mBoxX.initRotD = mBoxX.rotD;
+	mBoxX.initScl = mBoxX.scl;	mBoxX.initRotD = mBoxX.rotD; mBoxX.initPos = mBoxX.pos;
 	// PS b3: dbgColor
 	{
 		D3D11_BUFFER_DESC bd{};
@@ -860,7 +861,7 @@ bool TutorialApp::InitScene()
 	//======================  SKYBOX: Texture / Sampler  ======================
 	{
 		HR_T(CreateDDSTextureFromFile(m_pDevice,
-			L"../Resource/Hanako.dds", nullptr, &m_pSkySRV));
+			L"../Resource/Cubemap.dds", nullptr, &m_pSkySRV));
 
 		D3D11_SAMPLER_DESC sd{}; // clamp가 세렝게티
 		sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -1099,6 +1100,8 @@ void TutorialApp::UpdateImGUI()
 
 		// 스냅샷 1회 저장
 		static bool s_inited = false;
+		static double s_initAnimT = 0.0;
+		static float  s_initAnimSpeed = 1.0f;
 		static Vector3 s_initCubePos{}, s_initCubeScale{};
 		static float   s_initSpin = 0.0f, s_initFov = 60.0f, s_initNear = 0.1f, s_initFar = 1.0f;
 		static Vector3 s_initLightColor{};
@@ -1108,6 +1111,8 @@ void TutorialApp::UpdateImGUI()
 		static Vector3 s_initArrowPos{}, s_initArrowScale{};
 		if (!s_inited) {
 			s_inited = true;
+			s_initAnimT = mAnimT;
+			s_initAnimSpeed = mAnimSpeed;
 			s_initCubePos = cubeTransformA;   s_initCubeScale = cubeScale;   s_initSpin = spinSpeed;
 			s_initFov = m_FovDegree;          s_initNear = m_Near;           s_initFar = m_Far;
 			s_initLightColor = m_LightColor;  s_initLightYaw = m_LightYaw;   s_initLightPitch = m_LightPitch; s_initLightIntensity = m_LightIntensity;
@@ -1215,28 +1220,22 @@ void TutorialApp::UpdateImGUI()
 				// 클립 메타 정보 (있으면 표시)
 				const double tps = mBoxRig->GetTicksPerSecond();
 				const double durS = mBoxRig->GetClipDurationSec();
-				const auto& cname = mBoxRig->GetClipName();
+				//const auto& cname = mBoxRig->GetClipName();
 
-				ImGui::Text("Clip: %s", cname.empty() ? "(no name)" : cname.c_str());
+				//ImGui::Text("Clip: %s", cname.empty() ? "(no name)" : cname.c_str());
 				ImGui::Text("Ticks/sec: %.3f", tps);
 				ImGui::Text("Duration:  %.3f sec", durS);
 
 				// Play/Loop/Speed
 				ImGui::Checkbox("Play", &mBox_Play); ImGui::SameLine();
 				ImGui::Checkbox("Loop", &mBox_Loop);
-				ImGui::DragFloat("Speed (x)", &mBox_Speed, 0.01f, -4.0f, 4.0f, "%.2f");
 
 				// 시간 스크럽 (초)
 				float maxT = (float)((durS > 0.0) ? durS : 1.0f);
 				float t_ui = (float)mAnimT;
 
-				if (ImGui::SliderFloat("Time (sec)", &t_ui, 0.0f, maxT, "%.3f"))
-				{
-					mAnimT = (double)t_ui;
-					if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
-				}
-
 				// Rewind 버튼
+				ImGui::SameLine();
 				if (ImGui::Button("Rewind to 0")) {
 					mAnimT = 0.0;
 					if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
@@ -1244,6 +1243,22 @@ void TutorialApp::UpdateImGUI()
 				ImGui::SameLine();
 				if (ImGui::Button("Go to End")) {
 					mAnimT = (durS > 0.0) ? durS : 0.0;
+					if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
+				}
+
+				ImGui::DragFloat("Speed (x)", &mBox_Speed, 0.01f, -4.0f, 4.0f, "%.2f");
+				
+				if (ImGui::SliderFloat("Time (sec)", &t_ui, 0.0f, maxT, "%.3f"))
+				{
+					mAnimT = (double)t_ui;
+					if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
+				}		
+
+				if (ImGui::Button(u8"애니메이션 초기화")) {
+					mBox_Play = true;
+					mBox_Loop = true;
+					mBox_Speed = 1.0;   // mBox_Speed가 double이어도 OK
+					mAnimT = 0.0;
 					if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
 				}
 			}
