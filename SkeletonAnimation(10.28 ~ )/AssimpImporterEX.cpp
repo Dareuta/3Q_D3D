@@ -21,7 +21,7 @@ static unsigned MakeFlags(bool flipUV, bool leftHanded) {
 
 static std::wstring Widen(const aiString& s) {
     std::string a = s.C_Str();
-    return std::wstring(a.begin(), a.end()); 
+    return std::wstring(a.begin(), a.end());
 }
 
 static std::wstring FileOnly(const std::wstring& p) {
@@ -89,4 +89,110 @@ bool AssimpImporterEx::LoadFBX_PNTT_AndMaterials(
         out.submeshes.push_back(sm);
     }
     return true;
+}
+
+void AssimpImporterEx::ConvertAiMeshToPNTT(const aiMesh* am, MeshData_PNTT& out)
+{
+    out.vertices.clear();
+    out.indices.clear();
+    out.submeshes.clear();
+    // materials는 여기서 건드리지 않음 (ExtractMaterials() 결과를 호출측에서 채워넣으세요)
+
+    if (!am) return;
+
+    out.vertices.resize(am->mNumVertices);
+    for (unsigned v = 0; v < am->mNumVertices; ++v) {
+        VertexCPU_PNTT vv{};
+
+        // Position
+        vv.px = am->mVertices[v].x;
+        vv.py = am->mVertices[v].y;
+        vv.pz = am->mVertices[v].z;
+
+        // Normal
+        if (am->HasNormals()) {
+            vv.nx = am->mNormals[v].x;
+            vv.ny = am->mNormals[v].y;
+            vv.nz = am->mNormals[v].z;
+        }
+        else {
+            vv.nx = 0.0f; vv.ny = 1.0f; vv.nz = 0.0f;
+        }
+
+        // UV0
+        if (am->HasTextureCoords(0)) {
+            vv.u = am->mTextureCoords[0][v].x;
+            vv.v = am->mTextureCoords[0][v].y;
+        }
+        else {
+            vv.u = vv.v = 0.0f;
+        }
+
+        // Tangent + handedness (tw)
+        if (am->HasTangentsAndBitangents()) {
+            const aiVector3D& t = am->mTangents[v];
+            const aiVector3D& b = am->mBitangents[v];
+            aiVector3D n = am->HasNormals() ? am->mNormals[v] : aiVector3D(0, 1, 0);
+
+            // cross(N,T)
+            aiVector3D c(
+                n.y * t.z - n.z * t.y,
+                n.z * t.x - n.x * t.z,
+                n.x * t.y - n.y * t.x
+            );
+            float sign = (c.x * b.x + c.y * b.y + c.z * b.z) < 0.0f ? -1.0f : 1.0f;
+
+            vv.tx = t.x; vv.ty = t.y; vv.tz = t.z; vv.tw = sign;
+        }
+        else {
+            vv.tx = 1.0f; vv.ty = 0.0f; vv.tz = 0.0f; vv.tw = 1.0f;
+        }
+
+        out.vertices[v] = vv;
+    }
+
+    // Indices (로컬 인덱스 그대로; baseVertex를 추가로 더하지 않는다)
+    out.indices.reserve(am->mNumFaces * 3);
+    for (unsigned f = 0; f < am->mNumFaces; ++f) {
+        const aiFace& face = am->mFaces[f];
+        // aiProcess_Triangulate 가정하에 3개
+        for (unsigned k = 0; k < face.mNumIndices; ++k)
+            out.indices.push_back(static_cast<uint32_t>(face.mIndices[k]));
+    }
+
+    // Submesh (aiMesh 하나 = 1개)
+    SubMeshCPU sm{};
+    sm.baseVertex = 0;
+    sm.indexStart = 0;
+    sm.indexCount = static_cast<uint32_t>(out.indices.size());
+    sm.materialIndex = am->mMaterialIndex;
+    out.submeshes.push_back(sm);
+}
+
+// 장면의 모든 재질을 MaterialCPU 배열로 추출(파일명만 보관)
+void AssimpImporterEx::ExtractMaterials(const aiScene* sc, std::vector<MaterialCPU>& out)
+{
+    out.clear();
+    if (!sc) return;
+    out.resize(sc->mNumMaterials);
+
+    auto grabTex = [&](aiMaterial* m, aiTextureType t) -> std::wstring {
+        aiString p;
+        if (m && m->GetTextureCount(t) > 0 && m->GetTexture(t, 0, &p) == AI_SUCCESS) {
+            return FileOnly(Widen(p)); // 파일명만
+        }
+        return L"";
+        };
+
+    for (unsigned i = 0; i < sc->mNumMaterials; ++i) {
+        aiMaterial* m = sc->mMaterials[i];
+        MaterialCPU mc{};
+        mc.diffuse = grabTex(m, aiTextureType_DIFFUSE);
+        mc.normal = grabTex(m, aiTextureType_NORMALS);
+        if (mc.normal.empty()) mc.normal = grabTex(m, aiTextureType_HEIGHT); // 일부 툴은 HEIGHT에 노말맵 둠
+        mc.specular = grabTex(m, aiTextureType_SPECULAR);
+        mc.emissive = grabTex(m, aiTextureType_EMISSIVE);
+        mc.opacity = grabTex(m, aiTextureType_OPACITY);
+        out[i] = std::move(mc);
+    }
 }

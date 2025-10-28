@@ -9,11 +9,15 @@
 #include "StaticMesh.h"
 #include "Material.h"
 
+#include "RigidSkeletal.h"  
+
 #include <directxtk/SimpleMath.h>
 
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
+
+
 
 class TutorialApp : public GameApp
 {
@@ -177,4 +181,8 @@ private:
     // 디버그 화살표 위치/스케일
     Vector3 m_ArrowPos{ 0.0f, -100.0f, 100.0f };
     Vector3 m_ArrowScale{ 1.0f,  1.0f,   1.0f };
+
+    std::unique_ptr<RigidSkeletal> mBoxRig; // BoxHuman의 Rigid 스켈레톤
+    double mAnimT = 0.0;                    // 애니메이션 시간(초)
+    double mAnimSpeed = 1.0;                // 재생 속도 배율
 };

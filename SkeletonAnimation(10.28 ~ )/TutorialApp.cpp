@@ -87,6 +87,10 @@ void TutorialApp::OnUpdate()
 	XMMATRIX mScaleA = XMMatrixScaling(cubeScale.x, cubeScale.y, cubeScale.z);
 	XMMATRIX mTranslateA = XMMatrixTranslation(cubeTransformA.x, cubeTransformA.y, cubeTransformA.z);
 	m_World = mScaleA * mSpin * mTranslateA;
+
+	mAnimT += GameTimer::m_Instance->DeltaTime() * mAnimSpeed;
+	if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
+
 }
 
 
@@ -346,9 +350,26 @@ void TutorialApp::OnRender()
 			if (mTreeX.enabled)  DrawOpaqueOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
 			if (mCharX.enabled)  DrawOpaqueOnly(gChar, gCharMtls, ComposeSRT(mCharX));
 			if (mZeldaX.enabled) DrawOpaqueOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
-			DrawOpaqueOnly(gBoxHuman, gBoxMtls, ComposeSRT(mBoxX));
+
+			// ▼▼ 여기 교체 (StaticMesh -> RigidSkeletal)
+			if (mBoxRig && mBoxX.enabled) {
+				mBoxRig->DrawOpaqueOnly(
+					m_pDeviceContext,
+					ComposeSRT(mBoxX),
+					/* view / proj */        view, m_Projection,
+					/* cb/use */             m_pConstantBuffer, m_pUseCB,
+					/* light */              cb.vLightDir, cb.vLightColor,
+					/* eye */                eye,
+					/* material */           m_Ka, m_Ks, m_Shininess, m_Ia,
+					/* disable toggles */    mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
+				);
+			}
+
 		}
 	}
+
+
+
 
 	// ===== (투명 패스 전) RS 백업 & 필요시 override =====
 	ID3D11RasterizerState* oldRS = nullptr;
@@ -376,7 +397,19 @@ void TutorialApp::OnRender()
 			if (mTreeX.enabled)  DrawAlphaCutOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
 			if (mCharX.enabled)  DrawAlphaCutOnly(gChar, gCharMtls, ComposeSRT(mCharX));
 			if (mZeldaX.enabled) DrawAlphaCutOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
-			DrawAlphaCutOnly(gBoxHuman, gBoxMtls, ComposeSRT(mBoxX));
+
+			if (mBoxRig && mBoxX.enabled) {
+				mBoxRig->DrawAlphaCutOnly(
+					m_pDeviceContext,
+					ComposeSRT(mBoxX),
+					/* view/proj */       view, m_Projection,
+					/* cb/use */          m_pConstantBuffer, m_pUseCB,
+					/* alphaCut */        mDbg.alphaCut,
+					/* light */           cb.vLightDir, cb.vLightColor,
+					/* eye/material */    eye, m_Ka, m_Ks, m_Shininess, m_Ia,
+					/* toggles */         mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
+				);
+			}
 		}
 	}
 
@@ -401,94 +434,106 @@ void TutorialApp::OnRender()
 			if (mTreeX.enabled)  DrawTransparentOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
 			if (mCharX.enabled)  DrawTransparentOnly(gChar, gCharMtls, ComposeSRT(mCharX));
 			if (mZeldaX.enabled) DrawTransparentOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
-			DrawTransparentOnly(gBoxHuman, gBoxMtls, ComposeSRT(mBoxX));
+
+			// ▼▼ 교체
+			if (mBoxRig && mBoxX.enabled) {
+				mBoxRig->DrawTransparentOnly(
+					m_pDeviceContext,
+					ComposeSRT(mBoxX),
+					/* view/proj */       view, m_Projection,
+					/* cb/use */          m_pConstantBuffer, m_pUseCB,
+					/* light */           cb.vLightDir, cb.vLightColor,
+					/* eye/material */    eye, m_Ka, m_Ks, m_Shininess, m_Ia,
+					/* toggles */         mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
+				);
+			}
+
+			m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
+			m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldSR);
+			SAFE_RELEASE(oldBS); SAFE_RELEASE(oldDSS);
 		}
 
-		m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
-		m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldSR);
-		SAFE_RELEASE(oldBS); SAFE_RELEASE(oldDSS);
-	}
+		// ===== 투명 패스 끝나고 RS 복원 =====
+		if (oldRS) {
+			m_pDeviceContext->RSSetState(oldRS);
+			oldRS->Release();
+		}
 
-	// ===== 투명 패스 끝나고 RS 복원 =====
-	if (oldRS) {
-		m_pDeviceContext->RSSetState(oldRS);
-		oldRS->Release();
-	}
+		// ===== D) DEBUG: Directional light arrow in world (origin base, unlit) =====
+		if (mDbg.showLightArrow) {
+			// 1) -lightDir로 향하게 (광선 진행방향)
+			Vector3 D = -dir;   // dir은 이미 Vector3임
+			D.Normalize();      // 멤버 Normalize()는 in-place, 반환값 없음
 
-	// ===== D) DEBUG: Directional light arrow in world (origin base, unlit) =====
-	if (mDbg.showLightArrow) {
-		// 1) -lightDir로 향하게 (광선 진행방향)
-		Vector3 D = -dir;   // dir은 이미 Vector3임
-		D.Normalize();      // 멤버 Normalize()는 in-place, 반환값 없음
+			Matrix worldArrow =
+				Matrix::CreateScale(m_ArrowScale) *
+				Matrix::CreateWorld(m_ArrowPos, D, Vector3::UnitY);
 
-		Matrix worldArrow =
-			Matrix::CreateScale(m_ArrowScale) *
-			Matrix::CreateWorld(m_ArrowPos, D, Vector3::UnitY);
+			// 3) CB0 업데이트 (World만 교체)
+			ConstantBuffer local = cb;
+			local.mWorld = XMMatrixTranspose(worldArrow);
+			local.mWorldInvTranspose = XMMatrixTranspose(worldArrow.Invert());
+			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
+			m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 
-		// 3) CB0 업데이트 (World만 교체)
-		ConstantBuffer local = cb;
-		local.mWorld = XMMatrixTranspose(worldArrow);
-		local.mWorldInvTranspose = XMMatrixTranspose(worldArrow.Invert());
-		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
-		m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+			// 4) 상태 백업
+			ID3D11RasterizerState* oldRS = nullptr; m_pDeviceContext->RSGetState(&oldRS);
+			ID3D11DepthStencilState* oldDSS = nullptr; UINT oldRef = 0; m_pDeviceContext->OMGetDepthStencilState(&oldDSS, &oldRef);
+			ID3D11BlendState* oldBS = nullptr; float oldBF[4]; UINT oldSM = 0xFFFFFFFF; m_pDeviceContext->OMGetBlendState(&oldBS, oldBF, &oldSM);
+			ID3D11InputLayout* oldIL = nullptr; m_pDeviceContext->IAGetInputLayout(&oldIL);
+			ID3D11VertexShader* oldVS = nullptr; m_pDeviceContext->VSGetShader(&oldVS, nullptr, 0);
+			ID3D11PixelShader* oldPS = nullptr; m_pDeviceContext->PSGetShader(&oldPS, nullptr, 0);
 
-		// 4) 상태 백업
-		ID3D11RasterizerState* oldRS = nullptr; m_pDeviceContext->RSGetState(&oldRS);
-		ID3D11DepthStencilState* oldDSS = nullptr; UINT oldRef = 0; m_pDeviceContext->OMGetDepthStencilState(&oldDSS, &oldRef);
-		ID3D11BlendState* oldBS = nullptr; float oldBF[4]; UINT oldSM = 0xFFFFFFFF; m_pDeviceContext->OMGetBlendState(&oldBS, oldBF, &oldSM);
-		ID3D11InputLayout* oldIL = nullptr; m_pDeviceContext->IAGetInputLayout(&oldIL);
-		ID3D11VertexShader* oldVS = nullptr; m_pDeviceContext->VSGetShader(&oldVS, nullptr, 0);
-		ID3D11PixelShader* oldPS = nullptr; m_pDeviceContext->PSGetShader(&oldPS, nullptr, 0);
+			// 5) 파이프라인 바인드 (깊이 ON, 블렌드 OFF, CullNone)
+			float bf[4] = { 0,0,0,0 };
+			m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
+			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
+			if (m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS);
 
-		// 5) 파이프라인 바인드 (깊이 ON, 블렌드 OFF, CullNone)
-		float bf[4] = { 0,0,0,0 };
-		m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
-		m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
-		if (m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS);
+			UINT stride = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT4);
+			UINT offset = 0;
+			m_pDeviceContext->IASetInputLayout(m_pDbgIL);
+			m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pArrowVB, &stride, &offset);
+			m_pDeviceContext->IASetIndexBuffer(m_pArrowIB, DXGI_FORMAT_R16_UINT, 0);
+			m_pDeviceContext->VSSetShader(m_pDbgVS, nullptr, 0);
+			m_pDeviceContext->PSSetShader(m_pDbgPS, nullptr, 0);
 
-		UINT stride = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT4);
-		UINT offset = 0;
-		m_pDeviceContext->IASetInputLayout(m_pDbgIL);
-		m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pArrowVB, &stride, &offset);
-		m_pDeviceContext->IASetIndexBuffer(m_pArrowIB, DXGI_FORMAT_R16_UINT, 0);
-		m_pDeviceContext->VSSetShader(m_pDbgVS, nullptr, 0);
-		m_pDeviceContext->PSSetShader(m_pDbgPS, nullptr, 0);
+			// 6) Draw
+			const UINT indexCount = 6   // back
+				+ 24 // sides
+				+ 6  // head base
+				+ 12;// head sides
 
-		// 6) Draw
-		const UINT indexCount = 6   // back
-			+ 24 // sides
-			+ 6  // head base
-			+ 12;// head sides
+			// 항상 밝은 노랑(원하면 바꿔)
+			const DirectX::XMFLOAT4 kBright = { 1.0f, 0.95f, 0.2f, 1.0f };
+			m_pDeviceContext->UpdateSubresource(m_pDbgCB, 0, nullptr, &kBright, 0, 0);
+			m_pDeviceContext->PSSetConstantBuffers(3, 1, &m_pDbgCB);
 
-		// 항상 밝은 노랑(원하면 바꿔)
-		const DirectX::XMFLOAT4 kBright = { 1.0f, 0.95f, 0.2f, 1.0f };
-		m_pDeviceContext->UpdateSubresource(m_pDbgCB, 0, nullptr, &kBright, 0, 0);
-		m_pDeviceContext->PSSetConstantBuffers(3, 1, &m_pDbgCB);
+			// 혹시 남아있는 SRV 상태가 이상하게 영향 주는 카드가 있어서, 그냥 싹 언바인드
+			ID3D11ShaderResourceView* nullSRV[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
+			m_pDeviceContext->PSSetShaderResources(0, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT, nullSRV);
 
-		// 혹시 남아있는 SRV 상태가 이상하게 영향 주는 카드가 있어서, 그냥 싹 언바인드
-		ID3D11ShaderResourceView* nullSRV[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
-		m_pDeviceContext->PSSetShaderResources(0, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT, nullSRV);
+			m_pDeviceContext->DrawIndexed(indexCount, 0, 0);
 
-		m_pDeviceContext->DrawIndexed(indexCount, 0, 0);
-
-		// 7) 상태 복원
-		m_pDeviceContext->VSSetShader(oldVS, nullptr, 0);
-		m_pDeviceContext->PSSetShader(oldPS, nullptr, 0);
-		m_pDeviceContext->IASetInputLayout(oldIL);
-		m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
-		m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldRef);
-		m_pDeviceContext->RSSetState(oldRS);
-		SAFE_RELEASE(oldVS); SAFE_RELEASE(oldPS); SAFE_RELEASE(oldIL);
-		SAFE_RELEASE(oldBS); SAFE_RELEASE(oldDSS); SAFE_RELEASE(oldRS);
-	}
+			// 7) 상태 복원
+			m_pDeviceContext->VSSetShader(oldVS, nullptr, 0);
+			m_pDeviceContext->PSSetShader(oldPS, nullptr, 0);
+			m_pDeviceContext->IASetInputLayout(oldIL);
+			m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
+			m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldRef);
+			m_pDeviceContext->RSSetState(oldRS);
+			SAFE_RELEASE(oldVS); SAFE_RELEASE(oldPS); SAFE_RELEASE(oldIL);
+			SAFE_RELEASE(oldBS); SAFE_RELEASE(oldDSS); SAFE_RELEASE(oldRS);
+		}
 
 
 
 #ifdef _DEBUG
-	UpdateImGUI();
+		UpdateImGUI();
 #endif
-	m_pSwapChain->Present(1, 0);
+		m_pSwapChain->Present(1, 0);
+	}
 }
 
 //================================================================================================
@@ -694,7 +739,12 @@ bool TutorialApp::InitScene()
 		BuildAll(L"../Resource/Tree/Tree.fbx", L"../Resource/Tree/", gTree, gTreeMtls);
 		BuildAll(L"../Resource/Character/Character.fbx", L"../Resource/Character/", gChar, gCharMtls);
 		BuildAll(L"../Resource/Zelda/zeldaPosed001.fbx", L"../Resource/Zelda/", gZelda, gZeldaMtls);
-		BuildAll(L"../Resource/BoxHuman/BoxHuman.fbx", L"../Resource/BoxHuman/", gBoxHuman, gBoxMtls);
+		//BuildAll(L"../Resource/BoxHuman/BoxHuman.fbx", L"../Resource/BoxHuman/", gBoxHuman, gBoxMtls);
+		mBoxRig = RigidSkeletal::LoadFromFBX(
+			m_pDevice,
+			L"../Resource/BoxHuman/BoxHuman.fbx",
+			L"../Resource/BoxHuman/"
+		);
 	}
 	// === Rasterizer states ===
 	{
@@ -735,7 +785,7 @@ bool TutorialApp::InitScene()
 		ID3D10Blob* vsb = nullptr;
 		HR_T(CompileShaderFromFile(L"../Resource/Sky_VS.hlsl", "main", "vs_5_0", &vsb));
 		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pSkyVS));
-		
+
 		// Sky VS는 position-only( float3 POSITION ) 기준
 		D3D11_INPUT_ELEMENT_DESC il[] = {
 			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
@@ -1132,7 +1182,7 @@ void TutorialApp::UpdateImGUI()
 			ImGui::Checkbox("Wireframe", &mDbg.wireframe); ImGui::SameLine();
 			ImGui::Checkbox("Cull None", &mDbg.cullNone);
 			ImGui::Checkbox("Depth Write/Test OFF (mesh)", &mDbg.depthWriteOff);
-			//ImGui::Checkbox("Freeze Time", &mDbg.freezeTime);
+			ImGui::Checkbox("Freeze Time", &mDbg.freezeTime); // 이거 작동 안함
 
 			ImGui::Separator();
 			ImGui::Text("Texture Map Overrides");
