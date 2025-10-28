@@ -1,4 +1,4 @@
-// RigidSkeletal.h
+ï»¿// RigidSkeletal.h
 #pragma once
 #include <string>
 #include <vector>
@@ -17,11 +17,11 @@ struct RS_Node
     int parent = -1;
     std::vector<int> children;
 
-    Matrix bindLocal = Matrix::Identity;     // FBX ³ëµåÀÇ ·ÎÄÃ ¹ÙÀÎµå
-    Matrix poseLocal = Matrix::Identity;     // ¾Ö´Ï¸ŞÀÌ¼ÇÀ¸·Î °è»êµÈ ·ÎÄÃ Æ÷Áî
-    Matrix poseGlobal = Matrix::Identity;    // ºÎ¸ğ ´©ÀûµÈ ±Û·Î¹ú Æ÷Áî
+    Matrix bindLocal = Matrix::Identity;     // FBX ë…¸ë“œì˜ ë¡œì»¬ ë°”ì¸ë“œ
+    Matrix poseLocal = Matrix::Identity;     // ì• ë‹ˆë©”ì´ì…˜ìœ¼ë¡œ ê³„ì‚°ëœ ë¡œì»¬ í¬ì¦ˆ
+    Matrix poseGlobal = Matrix::Identity;    // ë¶€ëª¨ ëˆ„ì ëœ ê¸€ë¡œë²Œ í¬ì¦ˆ
 
-    // ÀÌ ³ëµå¿¡ ºÙÀº 'ºÎºĞ ¸Ş½Ã' ÀÎµ¦½º(¿©·¯ °³ÀÏ ¼ö ÀÖÀ½, º¸Åë 0~1°³)
+    // ì´ ë…¸ë“œì— ë¶™ì€ 'ë¶€ë¶„ ë©”ì‹œ' ì¸ë±ìŠ¤(ì—¬ëŸ¬ ê°œì¼ ìˆ˜ ìˆìŒ, ë³´í†µ 0~1ê°œ)
     std::vector<int> partIndices;
 };
 
@@ -31,7 +31,7 @@ struct RS_KeyS { double t; Vector3 v; };
 
 struct RS_Channel
 {
-    std::string target;          // ³ëµå ÀÌ¸§
+    std::string target;          // ë…¸ë“œ ì´ë¦„
     std::vector<RS_KeyT> T;
     std::vector<RS_KeyR> R;
     std::vector<RS_KeyS> S;
@@ -41,7 +41,7 @@ struct RS_Clip
 {
     std::string name;
     double duration = 0.0;       // ticks
-    double ticksPerSec = 25.0;   // ±âº» 25
+    double ticksPerSec = 25.0;   // ê¸°ë³¸ 25
     std::vector<RS_Channel> channels;
 
     // targetName -> index
@@ -50,25 +50,25 @@ struct RS_Clip
 
 struct RS_Part
 {
-    // °¢ ÆÄÆ®´Â µ¶¸³ StaticMesh (°£´ÜÇÏ°Ô ±¸Çö; BoxHuman´Â ÆÄÆ® ¼ö ÀûÀ½)
+    // ê° íŒŒíŠ¸ëŠ” ë…ë¦½ StaticMesh (ê°„ë‹¨í•˜ê²Œ êµ¬í˜„; BoxHumanëŠ” íŒŒíŠ¸ ìˆ˜ ì ìŒ)
     StaticMesh mesh;
-    std::vector<MaterialGPU> materials; // ÇØ´ç ÆÄÆ®¿¡ ¾²ÀÌ´Â ¸ÓÆ¼¸®¾óµé
-    int ownerNode = -1;                 // ÀÌ ÆÄÆ®ÀÇ ³ëµå ÀÎµ¦½º
+    std::vector<MaterialGPU> materials; // í•´ë‹¹ íŒŒíŠ¸ì— ì“°ì´ëŠ” ë¨¸í‹°ë¦¬ì–¼ë“¤
+    int ownerNode = -1;                 // ì´ íŒŒíŠ¸ì˜ ë…¸ë“œ ì¸ë±ìŠ¤
 };
 
 class RigidSkeletal
 {
 public:
-    // FBX¿¡¼­ °èÃş/¾Ö´Ï¸ŞÀÌ¼Ç/ÆÄÆ® ÃßÃâ ÈÄ GPU ºôµå±îÁö
+    // FBXì—ì„œ ê³„ì¸µ/ì• ë‹ˆë©”ì´ì…˜/íŒŒíŠ¸ ì¶”ì¶œ í›„ GPU ë¹Œë“œê¹Œì§€
     static std::unique_ptr<RigidSkeletal> LoadFromFBX(
         ID3D11Device* dev,
         const std::wstring& fbxPath,
         const std::wstring& texDir);
 
-    // ½Ã°£ ¾÷µ¥ÀÌÆ®(tSec = ÃÊ). Ã¹ ¾Ö´Ï¸ŞÀÌ¼Ç(º¸Åë Walk)À» »ç¿ë
+    // ì‹œê°„ ì—…ë°ì´íŠ¸(tSec = ì´ˆ). ì²« ì• ë‹ˆë©”ì´ì…˜(ë³´í†µ Walk)ì„ ì‚¬ìš©
     void EvaluatePose(double tSec);
 
-    // Opaque / Cutout / Transparent ·»´õ(±âÁ¸ ÆÄÀÌÇÁ¶óÀÎ¿¡ ±×´ë·Î ¸ÂÃã)
+    // Opaque / Cutout / Transparent ë Œë”(ê¸°ì¡´ íŒŒì´í”„ë¼ì¸ì— ê·¸ëŒ€ë¡œ ë§ì¶¤)
     void DrawOpaqueOnly(
         ID3D11DeviceContext* ctx,
         const DirectX::SimpleMath::Matrix& worldModel,
@@ -109,7 +109,7 @@ public:
         bool disableNormal, bool disableSpecular, bool disableEmissive);
 
 public:
-    // --- IMGUI/Å¸ÀÌ¹Ö¿ë °£´Ü Getter ---
+    // --- IMGUI/íƒ€ì´ë°ìš© ê°„ë‹¨ Getter ---
     double GetClipDurationTicks() const noexcept { return mClip.duration; }
     double GetTicksPerSecond()   const noexcept { return (mClip.ticksPerSec > 0.0) ? mClip.ticksPerSec : 25.0; }
     double GetClipDurationSec()  const noexcept { return GetClipDurationTicks() / GetTicksPerSecond(); }
@@ -119,7 +119,7 @@ public:
 private:
     RigidSkeletal() = default;
 
-    // ³»ºÎ À¯Æ¿(º¸°£)
+    // ë‚´ë¶€ ìœ í‹¸(ë³´ê°„)
     static int UpperBoundT(double t, const std::vector<RS_KeyT>& v);
     static int UpperBoundR(double t, const std::vector<RS_KeyR>& v);
     static int UpperBoundS(double t, const std::vector<RS_KeyS>& v);
@@ -130,9 +130,9 @@ private:
     std::vector<RS_Node> mNodes;
     std::vector<RS_Part> mParts;
 
-    RS_Clip mClip;     // Ã¹ ¹øÂ° Å¬¸³ »ç¿ë(¿¹: Walk)
+    RS_Clip mClip;     // ì²« ë²ˆì§¸ í´ë¦½ ì‚¬ìš©(ì˜ˆ: Walk)
     int mRoot = 0;
 
-    // Ä³½Ã: ÀÌ¸§->³ëµå
+    // ìºì‹œ: ì´ë¦„->ë…¸ë“œ
     std::unordered_map<std::string, int> mNameToNode;
 };
