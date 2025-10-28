@@ -4,6 +4,8 @@
 
 #include "TutorialApp.h"
 #include "../D3DCore/Helper.h"
+
+
 #include <d3dcompiler.h>
 #include <Directxtk/DDSTextureLoader.h>
 
@@ -197,6 +199,18 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 	}
 
+	//================================
+	Vector3 Ddir = dir;
+	Ddir.Normalize();      // 멤버 Normalize()는 in-place, 반환값 없음
+	Vector3 Dpos = Vector3(0, 10, 10);
+	Vector3 Dscl = Vector3(0.1, 0.1, 0.1);
+
+	Matrix worldArrow = Matrix::CreateScale(Dscl) * Matrix::CreateWorld(Dpos, Ddir, Vector3::UnitY);
+
+	// 드로우
+	DebugArrow_Draw(m_pDeviceContext, gArrow, worldArrow, cam, m_Projection);
+	//================================
+
 	m_pDeviceContext->PSSetShader(m_pPixelShader, nullptr, 0);
 
 #ifdef _DEBUG
@@ -210,6 +224,8 @@ void TutorialApp::OnRender()
 
 bool TutorialApp::InitScene()
 {
+	DebugArrow_Init(m_pDevice, gArrow);
+
 	HRESULT hr = 0;
 
 	//스카이 박스 뚝딱뚝딱
@@ -415,6 +431,8 @@ bool TutorialApp::InitScene()
 
 void TutorialApp::UninitScene()
 {
+	DebugArrow_Release(gArrow);
+
 	SAFE_RELEASE(m_pVertexBuffer);
 	SAFE_RELEASE(m_pIndexBuffer);
 	SAFE_RELEASE(m_pInputLayout);

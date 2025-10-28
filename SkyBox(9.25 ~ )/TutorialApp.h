@@ -5,6 +5,7 @@
 #pragma once
 #include <windows.h>
 #include "../D3DCore/GameApp.h"
+#include "../D3DCore/DebugArrow.h"
 #include <d3d11.h> // ID3D11Device, …Context, …Buffer 등을 포함
 
 #include <directxtk/SimpleMath.h> // 경량 수학 타입(Vector2/3/4, Matrix 등)
@@ -106,7 +107,7 @@ private:
 
 	float m_FovDegree = 60.0f;    // degrees
 	float m_Near = 0.01f;
-	float m_Far = 40.0f;
+	float m_Far = 400.0f;
 
 	float m_LightYaw = 0.0f;           // -π ~ +π (Y축 기준으로 회전) << 좌우로 회전
 	float m_LightPitch = -0.5f;        // -π/2 ~ +π/2 (하늘/땅 제한용) ( X축 기준으로 회전) << 위 아래로 끄덕
@@ -119,5 +120,7 @@ private:
 	Vector3 cubeTransformA = { 0.0f, 0.0f, 0.0f };
 	Vector3 cubeTransformB = { 5.0f, 0.0f, 0.0f };
 	Vector3 cubeTransformC = { 3.0f, 0.0f, 0.0f };
+
+	DebugArrow gArrow;
 };
 

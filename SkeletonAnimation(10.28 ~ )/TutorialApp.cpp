@@ -1095,7 +1095,7 @@ void TutorialApp::UpdateImGUI()
 	if (ImGui::Begin(u8"임꾸이(IMGUI)"))
 	{
 		// 상단 상태
-		ImGui::Text("FPS: %.1f (%.3f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
+		ImGui::Text("FPS: %.1f (%.3f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);	
 		ImGui::Separator();
 
 		// 스냅샷 1회 저장
@@ -1126,6 +1126,7 @@ void TutorialApp::UpdateImGUI()
 			ImGui::SliderFloat("FOV (deg)", &m_FovDegree, 10.0f, 120.0f, "%.1f");
 			ImGui::DragFloat("Near", &m_Near, 0.001f, 0.0001f, 10.0f, "%.5f");
 			ImGui::DragFloat("Far", &m_Far, 0.1f, 0.01f, 20000.0f);
+			ImGui::Text(u8"카메라 속도 변경: F1 ~ F3");
 			if (ImGui::Button(u8"카메라 초기화")) {
 				m_FovDegree = s_initFov; m_Near = s_initNear; m_Far = s_initFar;
 			}

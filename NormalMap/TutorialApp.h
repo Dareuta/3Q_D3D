@@ -5,6 +5,7 @@
 #pragma once
 #include <windows.h>
 #include "../D3DCore/GameApp.h"
+#include "../D3DCore/DebugArrow.h"
 #include <d3d11.h> // ID3D11Device, …Context, …Buffer 등을 포함
 
 #include <directxtk/SimpleMath.h> // 경량 수학 타입(Vector2/3/4, Matrix 등)
@@ -132,5 +133,7 @@ private:
 	Vector3 m_Ka = { 1.0f, 1.0f, 1.0f };
 	float   m_Ks = 0.9f;
 	float   m_Shininess = 64.0f;	
+
+	DebugArrow gArrow;
 };
 

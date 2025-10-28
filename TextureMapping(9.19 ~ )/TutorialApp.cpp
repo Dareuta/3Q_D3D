@@ -155,6 +155,18 @@ void TutorialApp::OnRender()
 		m_pDeviceContext->DrawIndexed(m_nIndices, 0, 0);
 	}
 
+	//================================
+	Vector3 Ddir = dir;
+	Ddir.Normalize();      // 멤버 Normalize()는 in-place, 반환값 없음
+	Vector3 Dpos = Vector3(0, 10, 10);
+	Vector3 Dscl = Vector3(0.1, 0.1, 0.1);
+
+	Matrix worldArrow = Matrix::CreateScale(Dscl) * Matrix::CreateWorld(Dpos, Ddir, Vector3::UnitY);
+
+	// 드로우
+	DebugArrow_Draw(m_pDeviceContext, gArrow, worldArrow, cam, m_Projection);
+	//================================
+
 	//// [오브젝트 B]
 	//{
 	//	auto world = m_World_A;
@@ -190,6 +202,8 @@ void TutorialApp::OnRender()
 
 bool TutorialApp::InitScene()
 {
+	DebugArrow_Init(m_pDevice, gArrow);
+
 	HRESULT hr = 0;
 
 	const float hTop = 1.4f;   // 위 꼭짓점 높이
@@ -301,6 +315,8 @@ bool TutorialApp::InitScene()
 
 void TutorialApp::UninitScene()
 {
+	DebugArrow_Release(gArrow);
+
 	SAFE_RELEASE(m_pVertexBuffer);
 	SAFE_RELEASE(m_pIndexBuffer);
 	SAFE_RELEASE(m_pInputLayout);
@@ -308,6 +324,7 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pPixelShader);
 	SAFE_RELEASE(m_pPixelShaderSolid);
 	SAFE_RELEASE(m_pConstantBuffer);
+
 }
 
 //================================================================================================
