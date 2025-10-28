@@ -108,6 +108,14 @@ public:
         const DirectX::SimpleMath::Vector3& Ia,
         bool disableNormal, bool disableSpecular, bool disableEmissive);
 
+public:
+    // --- IMGUI/타이밍용 간단 Getter ---
+    double GetClipDurationTicks() const noexcept { return mClip.duration; }
+    double GetTicksPerSecond()   const noexcept { return (mClip.ticksPerSec > 0.0) ? mClip.ticksPerSec : 25.0; }
+    double GetClipDurationSec()  const noexcept { return GetClipDurationTicks() / GetTicksPerSecond(); }
+    const std::string& GetClipName() const noexcept { return mClip.name; }
+
+
 private:
     RigidSkeletal() = default;
 

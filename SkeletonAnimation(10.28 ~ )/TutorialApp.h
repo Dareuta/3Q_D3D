@@ -185,4 +185,9 @@ private:
     std::unique_ptr<RigidSkeletal> mBoxRig; // BoxHuman의 Rigid 스켈레톤
     double mAnimT = 0.0;                    // 애니메이션 시간(초)
     double mAnimSpeed = 1.0;                // 재생 속도 배율
+
+    private:
+        bool  mBox_Play = true;   // 재생/일시정지
+        bool  mBox_Loop = true;   // 루프
+        float mBox_Speed = 1.0f;  // 재생 속도 배수(음수면 역재생)
 };

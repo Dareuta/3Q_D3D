@@ -80,19 +80,44 @@ void TutorialApp::OnUpdate()
 		tHold = GameTimer::m_Instance->TotalTime();
 	}
 
-	float t = tHold; // 고정 또는 진행
+	float t = tHold;
 	XMMATRIX mSpin = XMMatrixRotationY(t * spinSpeed);
 
-	// 여기서 m_World는 디폴트만 유지. 실제 각 모델 월드는 Draw 시 ComposeSRT로 처리
+	// 데모용 큐브 world (그대로 유지)
 	XMMATRIX mScaleA = XMMatrixScaling(cubeScale.x, cubeScale.y, cubeScale.z);
 	XMMATRIX mTranslateA = XMMatrixTranslation(cubeTransformA.x, cubeTransformA.y, cubeTransformA.z);
 	m_World = mScaleA * mSpin * mTranslateA;
 
-	mAnimT += GameTimer::m_Instance->DeltaTime() * mAnimSpeed;
-	if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
+	// ===== BoxHuman 애니메이션 시간 처리 =====
+	if (mBoxRig)
+	{
+		// 1) 재생 중이면 시간 증가
+		if (!mDbg.freezeTime && mBox_Play) {
+			mAnimT += GameTimer::m_Instance->DeltaTime() * mBox_Speed; // 초 단위
+		}
 
+		// 2) 지속 시간 구함
+		const double durSecD = mBoxRig->GetClipDurationSec(); // 게터가 없다면: double durSecD = 5.0;
+		const float  durSec = (float)durSecD;
+
+		// 3) 루프/클램프
+		if (durSec > 0.0f)
+		{
+			if (mBox_Loop) {
+				// 음수/양수 모두 안전한 랩
+				mAnimT = fmodf(mAnimT, durSec);
+				if (mAnimT < 0.0f) mAnimT += durSec;
+			}
+			else {
+				if (mAnimT < 0.0f)      mAnimT = 0.0f;
+				else if (mAnimT > durSec) mAnimT = durSec;
+			}
+		}
+
+		// 4) 평가
+		mBoxRig->EvaluatePose(mAnimT);
+	}
 }
-
 
 //================================================================================================
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1169,6 +1194,64 @@ void TutorialApp::UpdateImGUI()
 				m_ArrowScale = s_initArrowScale;
 				mDbg.showLightArrow = true;
 			}
+		}
+
+		if (ImGui::CollapsingHeader(u8"BoxHuman (RigidSkeletal)"))
+		{
+			// 4-1) Transform (다른 모델과 동일한 UI)
+			ImGui::Checkbox("Enabled", &mBoxX.enabled);
+			ImGui::DragFloat3("Position", (float*)&mBoxX.pos, 0.1f, -10000.0f, 10000.0f);
+			ImGui::DragFloat3("Rotation (deg XYZ)", (float*)&mBoxX.rotD, 0.5f, -720.0f, 720.0f);
+			ImGui::DragFloat3("Scale", (float*)&mBoxX.scl, 0.01f, 0.0001f, 1000.0f);
+			if (ImGui::Button(u8"트랜스폼 초기화")) {
+				mBoxX.pos = mBoxX.initPos; mBoxX.rotD = mBoxX.initRotD; mBoxX.scl = mBoxX.initScl; mBoxX.enabled = true;
+			}
+
+			// 4-2) Animation Controls
+			if (mBoxRig)
+			{
+				ImGui::SeparatorText("Animation");
+
+				// 클립 메타 정보 (있으면 표시)
+				const double tps = mBoxRig->GetTicksPerSecond();
+				const double durS = mBoxRig->GetClipDurationSec();
+				const auto& cname = mBoxRig->GetClipName();
+
+				ImGui::Text("Clip: %s", cname.empty() ? "(no name)" : cname.c_str());
+				ImGui::Text("Ticks/sec: %.3f", tps);
+				ImGui::Text("Duration:  %.3f sec", durS);
+
+				// Play/Loop/Speed
+				ImGui::Checkbox("Play", &mBox_Play); ImGui::SameLine();
+				ImGui::Checkbox("Loop", &mBox_Loop);
+				ImGui::DragFloat("Speed (x)", &mBox_Speed, 0.01f, -4.0f, 4.0f, "%.2f");
+
+				// 시간 스크럽 (초)
+				float maxT = (float)((durS > 0.0) ? durS : 1.0f);
+				float t_ui = (float)mAnimT;
+
+				if (ImGui::SliderFloat("Time (sec)", &t_ui, 0.0f, maxT, "%.3f"))
+				{
+					mAnimT = (double)t_ui;
+					if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
+				}
+
+				// Rewind 버튼
+				if (ImGui::Button("Rewind to 0")) {
+					mAnimT = 0.0;
+					if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
+				}
+				ImGui::SameLine();
+				if (ImGui::Button("Go to End")) {
+					mAnimT = (durS > 0.0) ? durS : 0.0;
+					if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
+				}
+			}
+			else
+			{
+				ImGui::TextDisabled("BoxHuman not loaded.");
+			}
+		
 		}
 
 		// === Toggles / Render Debug ===
