@@ -28,10 +28,16 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\Resource\07_0_Shared.hlsli" />
+    <FxCompile Include="..\Resource\BasicPixelShader.hlsl">
+      <Filter>리소스 파일</Filter>
+    </FxCompile>
+    <FxCompile Include="..\Resource\BasicVertexShader.hlsl">
+      <Filter>리소스 파일</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="..\Resource\BasicPixelShader.hlsl" />
-    <FxCompile Include="..\Resource\BasicVertexShader.hlsl" />
+    <None Include="..\Resource\07_0_Shared.hlsli">
+      <Filter>리소스 파일</Filter>
+    </None>
   </ItemGroup>
 </Project>

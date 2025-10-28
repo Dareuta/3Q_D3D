@@ -49,12 +49,22 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="Shader\PixelShader.hlsl" />
-    <FxCompile Include="Shader\VertexShader.hlsl" />
-    <FxCompile Include="..\Resource\Sky_PS.hlsl" />
-    <FxCompile Include="..\Resource\Sky_VS.hlsl" />
+    <FxCompile Include="Shader\PixelShader.hlsl">
+      <Filter>리소스 파일</Filter>
+    </FxCompile>
+    <FxCompile Include="..\Resource\Sky_PS.hlsl">
+      <Filter>리소스 파일</Filter>
+    </FxCompile>
+    <FxCompile Include="..\Resource\Sky_VS.hlsl">
+      <Filter>리소스 파일</Filter>
+    </FxCompile>
+    <FxCompile Include="Shader\VertexShader.hlsl">
+      <Filter>리소스 파일</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="Shader\Shared.hlsli" />
+    <None Include="Shader\Shared.hlsli">
+      <Filter>리소스 파일</Filter>
+    </None>
   </ItemGroup>
 </Project>
