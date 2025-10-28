@@ -520,7 +520,7 @@ bool TutorialApp::InitScene()
 	// === DebugColor shaders / IL ===
 	{
 		ID3D10Blob* vsb = nullptr;
-		HR_T(CompileShaderFromFile(L"Shader/DebugColor_VS.hlsl", "main", "vs_5_0", &vsb));
+		HR_T(CompileShaderFromFile(L"../Resource/DebugColor_VS.hlsl", "main", "vs_5_0", &vsb));
 		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pDbgVS));
 
 		D3D11_INPUT_ELEMENT_DESC il[] = {
@@ -531,7 +531,7 @@ bool TutorialApp::InitScene()
 		SAFE_RELEASE(vsb);
 
 		ID3D10Blob* psb = nullptr;
-		HR_T(CompileShaderFromFile(L"Shader/DebugColor_PS.hlsl", "main", "ps_5_0", &psb));
+		HR_T(CompileShaderFromFile(L"../Resource/DebugColor_PS.hlsl", "main", "ps_5_0", &psb));
 		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pDbgPS));
 		SAFE_RELEASE(psb);
 	}
