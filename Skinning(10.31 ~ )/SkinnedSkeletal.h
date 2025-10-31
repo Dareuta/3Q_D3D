@@ -88,8 +88,10 @@ public:
     void UpdateBonePalette(ID3D11DeviceContext* ctx, ID3D11Buffer* boneCB, const Matrix& worldModel);
 
     // Á¤º¸
-    double DurationSec() const { return (mClip.tps > 0.0) ? mClip.duration / mClip.tps : mClip.duration / 25.0; }
-
+    double DurationSec() const {
+        return (mClip.tps > 0.0) ? (mClip.duration / mClip.tps)
+            : (mClip.duration / 25.0);
+    }
 private:
     SkinnedSkeletal() = default;
     static int UB_T(double t, const std::vector<SK_KeyT>& v);

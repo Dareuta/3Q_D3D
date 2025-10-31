@@ -76,11 +76,9 @@ void TutorialApp::OnUninitialize()
 void TutorialApp::OnUpdate()
 {
 	static float tHold = 0.0f;
-	if (!mDbg.freezeTime) {
-		tHold = GameTimer::m_Instance->TotalTime();
-	}
-
+	if (!mDbg.freezeTime) tHold = GameTimer::m_Instance->TotalTime();
 	float t = tHold;
+
 	XMMATRIX mSpin = XMMatrixRotationY(t * spinSpeed);
 
 	// 데모용 큐브 world (그대로 유지)
@@ -88,35 +86,34 @@ void TutorialApp::OnUpdate()
 	XMMATRIX mTranslateA = XMMatrixTranslation(cubeTransformA.x, cubeTransformA.y, cubeTransformA.z);
 	m_World = mScaleA * mSpin * mTranslateA;
 
-	// ===== BoxHuman 애니메이션 시간 처리 =====
-	if (mBoxRig)
-	{
-		// 1) 재생 중이면 시간 증가
-		if (!mDbg.freezeTime && mBox_Play) {
-			mAnimT += GameTimer::m_Instance->DeltaTime() * mBox_Speed; // 초 단위
+	// TutorialApp.cpp::OnUpdate()
+
+	const double dt = (double)GameTimer::m_Instance->DeltaTime();
+
+	// --- BoxHuman ---
+	if (mBoxRig) {
+		if (!mDbg.freezeTime && mBoxAC.play) mBoxAC.t += dt * mBoxAC.speed;
+
+		const double durSec = mBoxRig->GetClipDurationSec();
+		if (durSec > 0.0) {
+			if (mBoxAC.loop) { mBoxAC.t = fmod(mBoxAC.t, durSec); if (mBoxAC.t < 0.0) mBoxAC.t += durSec; }
+			//else { mBoxAC.t = std::clamp(mBoxAC.t, 0.0, durSec); }
 		}
-
-		// 2) 지속 시간 구함
-		const double durSecD = mBoxRig->GetClipDurationSec(); // 게터가 없다면: double durSecD = 5.0;
-		const float  durSec = (float)durSecD;
-
-		// 3) 루프/클램프
-		if (durSec > 0.0f)
-		{
-			if (mBox_Loop) {
-				// 음수/양수 모두 안전한 랩
-				mAnimT = fmodf(mAnimT, durSec);
-				if (mAnimT < 0.0f) mAnimT += durSec;
-			}
-			else {
-				if (mAnimT < 0.0f)      mAnimT = 0.0f;
-				else if (mAnimT > durSec) mAnimT = durSec;
-			}
-		}
-
-		// 4) 평가
-		mBoxRig->EvaluatePose(mAnimT);
+		mBoxRig->EvaluatePose(mBoxAC.t);
 	}
+
+	// --- Skinned ---
+	if (mSkinRig) {
+		if (!mDbg.freezeTime && mSkinAC.play) mSkinAC.t += dt * mSkinAC.speed;
+
+		const double durSec = mSkinRig->DurationSec();
+		if (durSec > 0.0) {
+			if (mSkinAC.loop) { mSkinAC.t = fmod(mSkinAC.t, durSec); if (mSkinAC.t < 0.0) mSkinAC.t += durSec; }
+			//else { mSkinAC.t = std::clamp(mSkinAC.t, 0.0, durSec); }
+		}
+		mSkinRig->EvaluatePose(mSkinAC.t);
+	}
+
 }
 
 //================================================================================================
@@ -186,6 +183,10 @@ void TutorialApp::OnRender()
 	bp.I_ambient = Vector4(m_Ia.x, m_Ia.y, m_Ia.z, 0.0f);
 	m_pDeviceContext->UpdateSubresource(m_pBlinnCB, 0, nullptr, &bp, 0, 0);
 	m_pDeviceContext->PSSetConstantBuffers(1, 1, &m_pBlinnCB);
+
+	// 공통 값
+	auto* ctx = m_pDeviceContext;
+	Vector4 vLightDir = cb.vLightDir, vLightColor = cb.vLightColor;
 
 	// ===== 람다: OPAQUE ONLY (트렁크 등 불투명만) =====
 	auto DrawOpaqueOnly = [&](StaticMesh& mesh,
@@ -306,6 +307,54 @@ void TutorialApp::OnRender()
 				MaterialGPU::Unbind(m_pDeviceContext);
 			}
 		};
+
+	if (mSkinRig && mSkinX.enabled)
+	{
+		// 스키닝 셰이더 바인딩
+		ctx->IASetInputLayout(m_pSkinnedIL);
+		ctx->VSSetShader(m_pSkinnedVS, nullptr, 0);
+		ctx->PSSetShader(m_pMeshPS, nullptr, 0); // PS는 기존 그대로
+
+		// 1) Opaque (깊이 쓰기 ON, 블렌드 OFF)
+		ctx->OMSetDepthStencilState(m_pDSS_Opaque, 0);
+		ctx->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
+		mSkinRig->DrawOpaqueOnly(
+			ctx,
+			ComposeSRT(mSkinX),
+			view, m_Projection,
+			/* cb/use/bone */ m_pConstantBuffer, m_pUseCB, m_pBoneCB,
+			/* light */ vLightDir, vLightColor,
+			/* eye/material */ eye, m_Ka, m_Ks, m_Shininess, m_Ia,
+			/* toggles */ mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive);
+
+		// 2) Cutout (알파 테스트: 깊이 쓰기 ON, 블렌드 OFF)
+		ctx->OMSetDepthStencilState(m_pDSS_Opaque, 0);
+		ctx->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
+		mSkinRig->DrawAlphaCutOnly(
+			ctx,
+			ComposeSRT(mSkinX),
+			view, m_Projection,
+			m_pConstantBuffer, m_pUseCB, m_pBoneCB,
+			vLightDir, vLightColor,
+			eye, m_Ka, m_Ks, m_Shininess, m_Ia,
+			mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive);
+
+		// 3) Transparent (깊이 write OFF, 직알파 블렌드)
+		ctx->OMSetDepthStencilState(m_pDSS_Trans, 0);       // DepthWrite OFF
+		float blendFactor[4] = { 0,0,0,0 };
+		ctx->OMSetBlendState(m_pBS_Alpha, blendFactor, 0xFFFFFFFF);
+		mSkinRig->DrawTransparentOnly(
+			ctx,
+			ComposeSRT(mSkinX),
+			view, m_Projection,
+			m_pConstantBuffer, m_pUseCB, m_pBoneCB,
+			vLightDir, vLightColor,
+			eye, m_Ka, m_Ks, m_Shininess, m_Ia,
+			mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive);
+
+		// 상태 복귀는 네 기존 코드 흐름에 맞춰 처리
+	}
+
 
 	// ===== A) SKYBOX FIRST =====
 	if (mDbg.showSky) {
@@ -578,7 +627,7 @@ bool TutorialApp::InitScene()
 			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 			{ "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 			{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-			{ "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+			{ "TANGENT",  0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 		};
 
 		HR_T(m_pDevice->CreateInputLayout(il, _countof(il), vsb->GetBufferPointer(), vsb->GetBufferSize(), &m_pMeshIL));
@@ -607,6 +656,51 @@ bool TutorialApp::InitScene()
 		HR_T(CompileShaderFromFile(L"../Resource/DebugColor_PS.hlsl", "main", "ps_5_0", &psb));
 		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pDbgPS));
 		SAFE_RELEASE(psb);
+	}
+
+	// ===== Skinned VS(+IL) =====
+	{
+		D3D_SHADER_MACRO defs[] = { {"SKINNED","1"}, {nullptr,nullptr} };
+
+		ID3DBlob* vsbSkin = nullptr;
+		HR_T(D3DCompileFromFile(
+			L"Shader/VertexShaderSkinning.hlsl",
+			defs,
+			D3D_COMPILE_STANDARD_FILE_INCLUDE,
+			"main", "vs_5_0", 0, 0,
+			&vsbSkin, nullptr));
+
+		HR_T(m_pDevice->CreateVertexShader(
+			vsbSkin->GetBufferPointer(),
+			vsbSkin->GetBufferSize(),
+			nullptr,
+			&m_pSkinnedVS));
+
+		// 스키닝용 InputLayout (PNTT + BI/BW)
+		D3D11_INPUT_ELEMENT_DESC ILD_SKIN[] = {
+			{"POSITION",     0, DXGI_FORMAT_R32G32B32_FLOAT,         0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+			{"NORMAL",       0, DXGI_FORMAT_R32G32B32_FLOAT,         0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
+			{"TEXCOORD",     0, DXGI_FORMAT_R32G32_FLOAT,            0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0},
+			{"TANGENT",      0, DXGI_FORMAT_R32G32B32A32_FLOAT,      0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0},
+			{"BLENDINDICES", 0, DXGI_FORMAT_R8G8B8A8_UINT,           0, 48, D3D11_INPUT_PER_VERTEX_DATA, 0},
+			{"BLENDWEIGHT",  0, DXGI_FORMAT_R32G32B32A32_FLOAT,      0, 52, D3D11_INPUT_PER_VERTEX_DATA, 0},
+		};
+		HR_T(m_pDevice->CreateInputLayout(
+			ILD_SKIN, _countof(ILD_SKIN),
+			vsbSkin->GetBufferPointer(),
+			vsbSkin->GetBufferSize(),
+			&m_pSkinnedIL));
+
+		SAFE_RELEASE(vsbSkin);
+	}
+
+	// ===== Bone Palette CB (VS b4) =====
+	{
+		D3D11_BUFFER_DESC cbd{};
+		cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		cbd.Usage = D3D11_USAGE_DEFAULT;
+		cbd.ByteWidth = sizeof(DirectX::XMFLOAT4X4) * 256; // 256 bones 가정
+		HR_T(m_pDevice->CreateBuffer(&cbd, nullptr, &m_pBoneCB));
 	}
 
 	// === Debug Arrow mesh (월드축 +Z 기준) ===
@@ -765,12 +859,26 @@ bool TutorialApp::InitScene()
 		BuildAll(L"../Resource/Tree/Tree.fbx", L"../Resource/Tree/", gTree, gTreeMtls);
 		BuildAll(L"../Resource/Character/Character.fbx", L"../Resource/Character/", gChar, gCharMtls);
 		BuildAll(L"../Resource/Zelda/zeldaPosed001.fbx", L"../Resource/Zelda/", gZelda, gZeldaMtls);
-		//BuildAll(L"../Resource/BoxHuman/BoxHuman.fbx", L"../Resource/BoxHuman/", gBoxHuman, gBoxMtls);
+
+		BuildAll(L"../Resource/BoxHuman/BoxHuman.fbx", L"../Resource/BoxHuman/", gBoxHuman, gBoxMtls);
 		mBoxRig = RigidSkeletal::LoadFromFBX(
 			m_pDevice,
 			L"../Resource/BoxHuman/BoxHuman.fbx",
 			L"../Resource/BoxHuman/"
 		);
+
+		// ===== SkinningTest.fbx 로드 =====
+		{
+			mSkinRig = SkinnedSkeletal::LoadFromFBX(
+				m_pDevice,
+				L"../Resource/Skinning/SkinningTest.fbx",   // 너의 리소스 경로에 맞춰 조정
+				L"../Resource/Skinning/"                    // 텍스처 루트
+			);
+		
+			mSkinX.enabled = true;
+			mSkinX.pos = Vector3(0, 0, 0);
+			mSkinX.scl = Vector3(1, 1, 1);
+		}
 	}
 	// === Rasterizer states ===
 	{
@@ -1045,6 +1153,9 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pDSS_Opaque);
 	SAFE_RELEASE(m_pDSS_Trans);
 	//머가 이리 많음
+	SAFE_RELEASE(m_pSkinnedIL);
+	SAFE_RELEASE(m_pSkinnedVS);
+	SAFE_RELEASE(m_pBoneCB);
 }
 
 void TutorialApp::UninitD3D()

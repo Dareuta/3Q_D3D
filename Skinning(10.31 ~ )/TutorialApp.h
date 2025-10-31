@@ -10,6 +10,7 @@
 #include "Material.h"
 
 #include "RigidSkeletal.h"  
+#include "SkinnedSkeletal.h"
 
 #include <directxtk/SimpleMath.h>
 
@@ -101,6 +102,26 @@ private:
 	StaticMesh gBoxHuman;
 	std::vector<MaterialGPU> gBoxMtls;
 
+	// 클래스 멤버(기존 렌더링/셰이더 멤버들 근처에 추가)
+	ID3D11VertexShader* m_pSkinnedVS = nullptr;
+	ID3D11InputLayout* m_pSkinnedIL = nullptr;
+	ID3D11Buffer* m_pBoneCB = nullptr;   // VS b4: bone palette
+
+	std::unique_ptr<SkinnedSkeletal> mSkinRig;   // SkinningTest.fbx
+
+	// TutorialApp.h
+	struct AnimCtrl {
+		bool   play = true;
+		bool   loop = true;
+		double speed = 1.0;
+		double t = 0.0;
+	};
+
+	AnimCtrl mBoxAC;   // BoxHuman용
+	AnimCtrl mSkinAC;  // Skinned 모델용
+
+
+
 	// ===== 디버그 화살표 =====
 	ID3D11VertexShader* m_pDbgVS = nullptr;
 	ID3D11PixelShader* m_pDbgPS = nullptr;
@@ -176,6 +197,7 @@ private:
 
 	XformUI     mTreeX, mCharX, mZeldaX;
 	XformUI     mBoxX;
+	XformUI mSkinX;                               
 	DebugToggles mDbg;
 
 	// 디버그 화살표 위치/스케일
