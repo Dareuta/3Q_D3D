@@ -71,6 +71,35 @@ void TutorialApp::OnUninitialize()
 	UninitD3D();
 }
 
+// 공용 애니메이션 컨트롤 UI
+static void AnimUI(const char* label,
+	bool& play, bool& loop, float& speed, double& t,
+	double durationSec,
+	const std::function<void(double)>& evalPose)
+{
+	if (ImGui::TreeNode(label)) {
+		ImGui::Checkbox("Play", &play); ImGui::SameLine();
+		ImGui::Checkbox("Loop", &loop);
+
+		ImGui::DragFloat("Speed (x)", &speed, 0.01f, -4.0f, 4.0f, "%.2f");
+
+		const float maxT = (float)((durationSec > 0.0) ? durationSec : 1.0);
+		float tUI = (float)t;
+		if (ImGui::SliderFloat("Time (sec)", &tUI, 0.0f, maxT, "%.3f")) {
+			t = (double)tUI;
+			if (evalPose) evalPose(t);
+		}
+
+		if (ImGui::Button("Rewind")) { t = 0.0; if (evalPose) evalPose(t); }
+		ImGui::SameLine();
+		if (ImGui::Button("Go End")) { t = durationSec; if (evalPose) evalPose(t); }
+
+		ImGui::TreePop();
+	}
+}
+
+
+
 //================================================================================================
 
 void TutorialApp::OnUpdate()
@@ -93,26 +122,35 @@ void TutorialApp::OnUpdate()
 	// --- BoxHuman ---
 	if (mBoxRig) {
 		if (!mDbg.freezeTime && mBoxAC.play) mBoxAC.t += dt * mBoxAC.speed;
-
 		const double durSec = mBoxRig->GetClipDurationSec();
 		if (durSec > 0.0) {
-			if (mBoxAC.loop) { mBoxAC.t = fmod(mBoxAC.t, durSec); if (mBoxAC.t < 0.0) mBoxAC.t += durSec; }
-			//else { mBoxAC.t = std::clamp(mBoxAC.t, 0.0, durSec); }
+			if (mBoxAC.loop) {
+				mBoxAC.t = fmod(mBoxAC.t, durSec); if (mBoxAC.t < 0.0) mBoxAC.t += durSec;
+			}
+			else {
+				if (mBoxAC.t >= durSec) { mBoxAC.t = durSec; mBoxAC.play = false; } // 끝에서 정지
+				if (mBoxAC.t < 0.0) { mBoxAC.t = 0.0;   mBoxAC.play = false; } // 앞에서 정지
+			}
 		}
-		mBoxRig->EvaluatePose(mBoxAC.t);
+		mBoxRig->EvaluatePose(mBoxAC.t, mBoxAC.loop);  // ← loop 전달
 	}
 
 	// --- Skinned ---
 	if (mSkinRig) {
 		if (!mDbg.freezeTime && mSkinAC.play) mSkinAC.t += dt * mSkinAC.speed;
-
 		const double durSec = mSkinRig->DurationSec();
 		if (durSec > 0.0) {
-			if (mSkinAC.loop) { mSkinAC.t = fmod(mSkinAC.t, durSec); if (mSkinAC.t < 0.0) mSkinAC.t += durSec; }
-			//else { mSkinAC.t = std::clamp(mSkinAC.t, 0.0, durSec); }
+			if (mSkinAC.loop) {
+				mSkinAC.t = fmod(mSkinAC.t, durSec); if (mSkinAC.t < 0.0) mSkinAC.t += durSec;
+			}
+			else {
+				if (mSkinAC.t >= durSec) { mSkinAC.t = durSec; mSkinAC.play = false; }
+				if (mSkinAC.t < 0.0) { mSkinAC.t = 0.0;   mSkinAC.play = false; }
+			}
 		}
-		mSkinRig->EvaluatePose(mSkinAC.t);
+		mSkinRig->EvaluatePose(mSkinAC.t, mSkinAC.loop);
 	}
+
 
 }
 
@@ -1315,7 +1353,7 @@ void TutorialApp::UpdateImGUI()
 
 		if (ImGui::CollapsingHeader(u8"BoxHuman (RigidSkeletal)"))
 		{
-			// 4-1) Transform (다른 모델과 동일한 UI)
+			// Transform
 			ImGui::Checkbox("Enabled", &mBoxX.enabled);
 			ImGui::DragFloat3("Position", (float*)&mBoxX.pos, 0.1f, -10000.0f, 10000.0f);
 			ImGui::DragFloat3("Rotation (deg XYZ)", (float*)&mBoxX.rotD, 0.5f, -720.0f, 720.0f);
@@ -1324,62 +1362,60 @@ void TutorialApp::UpdateImGUI()
 				mBoxX.pos = mBoxX.initPos; mBoxX.rotD = mBoxX.initRotD; mBoxX.scl = mBoxX.initScl; mBoxX.enabled = true;
 			}
 
-			// 4-2) Animation Controls
+			ImGui::SeparatorText("Animation");
 			if (mBoxRig)
 			{
-				ImGui::SeparatorText("Animation");
-
-				// 클립 메타 정보 (있으면 표시)
 				const double tps = mBoxRig->GetTicksPerSecond();
 				const double durS = mBoxRig->GetClipDurationSec();
-				//const auto& cname = mBoxRig->GetClipName();
-
-				//ImGui::Text("Clip: %s", cname.empty() ? "(no name)" : cname.c_str());
 				ImGui::Text("Ticks/sec: %.3f", tps);
-				ImGui::Text("Duration:  %.3f sec", durS);
+				ImGui::Text("Duration : %.3f sec", durS);
 
-				// Play/Loop/Speed
-				ImGui::Checkbox("Play", &mBox_Play); ImGui::SameLine();
-				ImGui::Checkbox("Loop", &mBox_Loop);
-
-				// 시간 스크럽 (초)
-				float maxT = (float)((durS > 0.0) ? durS : 1.0f);
-				float t_ui = (float)mAnimT;
-
-				// Rewind 버튼
-				ImGui::SameLine();
-				if (ImGui::Button("Rewind to 0")) {
-					mAnimT = 0.0;
-					if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
-				}
-				ImGui::SameLine();
-				if (ImGui::Button("Go to End")) {
-					mAnimT = (durS > 0.0) ? durS : 0.0;
-					if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
-				}
-
-				ImGui::DragFloat("Speed (x)", &mBox_Speed, 0.01f, -4.0f, 4.0f, "%.2f");
-				
-				if (ImGui::SliderFloat("Time (sec)", &t_ui, 0.0f, maxT, "%.3f"))
-				{
-					mAnimT = (double)t_ui;
-					if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
-				}		
+				AnimUI("Controls",
+					mBoxAC.play, mBoxAC.loop, mBoxAC.speed, mBoxAC.t,
+					durS,
+					[&](double tNow) { mBoxRig->EvaluatePose(tNow); });
 
 				if (ImGui::Button(u8"애니메이션 초기화")) {
-					mBox_Play = true;
-					mBox_Loop = true;
-					mBox_Speed = 1.0;   // mBox_Speed가 double이어도 OK
-					mAnimT = 0.0;
-					if (mBoxRig) mBoxRig->EvaluatePose(mAnimT);
+					mBoxAC.play = true; mBoxAC.loop = true; mBoxAC.speed = 1.0f; mBoxAC.t = 0.0;
+					mBoxRig->EvaluatePose(mBoxAC.t);
 				}
 			}
-			else
-			{
+			else {
 				ImGui::TextDisabled("BoxHuman not loaded.");
 			}
-		
 		}
+
+		if (ImGui::CollapsingHeader(u8"SkinningTest (SkinnedSkeletal)", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			ImGui::Checkbox("Enabled", &mSkinX.enabled);
+			ImGui::DragFloat3("Position", (float*)&mSkinX.pos, 0.1f, -10000.0f, 10000.0f);
+			ImGui::DragFloat3("Rotation (deg XYZ)", (float*)&mSkinX.rotD, 0.5f, -720.0f, 720.0f);
+			ImGui::DragFloat3("Scale", (float*)&mSkinX.scl, 0.01f, 0.0001f, 1000.0f);
+			if (ImGui::Button(u8"트랜스폼 초기화##skin")) {
+				mSkinX.pos = mSkinX.initPos; mSkinX.rotD = mSkinX.initRotD; mSkinX.scl = mSkinX.initScl; mSkinX.enabled = true;
+			}
+
+			ImGui::SeparatorText("Animation");
+			if (mSkinRig)
+			{
+				const double durS = mSkinRig->DurationSec();
+				ImGui::Text("Duration : %.3f sec", durS);
+
+				AnimUI("Controls##skin",
+					mSkinAC.play, mSkinAC.loop, mSkinAC.speed, mSkinAC.t,
+					durS,
+					[&](double tNow) { mSkinRig->EvaluatePose(tNow); });
+
+				if (ImGui::Button(u8"애니메이션 초기화##skin")) {
+					mSkinAC.play = true; mSkinAC.loop = true; mSkinAC.speed = 1.0f; mSkinAC.t = 0.0;
+					mSkinRig->EvaluatePose(mSkinAC.t);
+				}
+			}
+			else {
+				ImGui::TextDisabled("Skinned rig not loaded.");
+			}
+		}
+
 
 		// === Toggles / Render Debug ===
 		if (ImGui::CollapsingHeader(u8"Toggles & Debug"))
@@ -1402,6 +1438,17 @@ void TutorialApp::UpdateImGUI()
 
 			ImGui::Checkbox("Force AlphaClip", &mDbg.forceAlphaClip);
 			ImGui::DragFloat("alphaCut", &mDbg.alphaCut, 0.01f, 0.0f, 1.0f);
+
+			if (ImGui::CollapsingHeader(u8"Material Debug (flags)"))
+			{
+				ImGui::TextDisabled("Opaque/Cutout/Transparent 패스는 실제 드로우 코드에서 분기됨.");
+				ImGui::Checkbox("Disable Normal", &mDbg.disableNormal);
+				ImGui::Checkbox("Disable Specular", &mDbg.disableSpecular);
+				ImGui::Checkbox("Disable Emissive", &mDbg.disableEmissive);
+				ImGui::Checkbox("Force AlphaClip", &mDbg.forceAlphaClip);
+				ImGui::DragFloat("alphaCut", &mDbg.alphaCut, 0.01f, 0.0f, 1.0f);
+			}
+
 
 			if (ImGui::Button(u8"디버그 토글 초기화")) {
 				mDbg = DebugToggles(); // 리셋

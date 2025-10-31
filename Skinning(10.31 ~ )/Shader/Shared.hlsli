@@ -1,6 +1,15 @@
 #ifndef SHARED_HLSLI_INCLUDED
 #define SHARED_HLSLI_INCLUDED
 
+
+cbuffer MAT : register(b5)
+{
+    float4 matBaseColor;
+    uint matUseBaseColor;
+    uint3 _matPad5;
+}
+
+
 // ===== CB0 (b0)
 cbuffer CB0 : register(b0)
 {

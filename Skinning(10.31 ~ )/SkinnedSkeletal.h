@@ -55,12 +55,16 @@ struct SK_Part {
 
 class SkinnedSkeletal {
 public:
+
+    DirectX::SimpleMath::Matrix mGlobalInv = DirectX::SimpleMath::Matrix::Identity;
+
     static std::unique_ptr<SkinnedSkeletal> LoadFromFBX(
         ID3D11Device* dev,
         const std::wstring& fbxPath,
         const std::wstring& texDir);
 
     void EvaluatePose(double tSec); // Rigid¿Í µ¿ÀÏ
+    void EvaluatePose(double tSec, bool loop);
     void DrawOpaqueOnly(
         ID3D11DeviceContext* ctx,
         const Matrix& worldModel, const Matrix& view, const Matrix& proj,

@@ -67,6 +67,7 @@ public:
 
     // 시간 업데이트(tSec = 초). 첫 애니메이션(보통 Walk)을 사용
     void EvaluatePose(double tSec);
+    void EvaluatePose(double tSec, bool loop);      // 
 
     // Opaque / Cutout / Transparent 렌더(기존 파이프라인에 그대로 맞춤)
     void DrawOpaqueOnly(

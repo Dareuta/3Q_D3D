@@ -13,6 +13,13 @@
 using namespace DirectX;
 using namespace DirectX::SimpleMath;
  
+
+static inline double fmod_pos(double x, double period) {
+	if (period <= 0.0) return 0.0;
+	double r = fmod(x, period);
+	return (r < 0.0) ? r + period : r;
+}
+
 // ===== ai -> DX 변환 =====
 static Matrix ToM(const aiMatrix4x4& A)
 {
@@ -300,22 +307,22 @@ std::unique_ptr<RigidSkeletal> RigidSkeletal::LoadFromFBX(
 }
 
 // ===== 포즈 평가 =====
-void RigidSkeletal::EvaluatePose(double tSec)
+void RigidSkeletal::EvaluatePose(double tSec, bool loop)
 {
 	if (mClip.duration <= 0.0) {
-		// 애니 없음: 바인드 포즈 유지
-		for (auto& n : mNodes) {
-			n.poseLocal = n.bindLocal;
-		}
+		for (auto& n : mNodes) n.poseLocal = n.bindLocal;
 	}
 	else {
-		double T = (mClip.ticksPerSec > 0.0) ? (tSec * mClip.ticksPerSec) : tSec * 25.0;
-		double u = fmod(T, mClip.duration);
-		for (int i = 0; i < (int)mNodes.size(); ++i) {
+		const double tps = (mClip.ticksPerSec > 0.0) ? mClip.ticksPerSec : 25.0;
+		const double T = tSec * tps; // seconds → ticks
+		const double u = loop ? fmod_pos(T, mClip.duration)
+			: std::clamp(T, 0.0, mClip.duration);
+
+		for (int i = 0; i < (int)mNodes.size(); ++i)
 			mNodes[i].poseLocal = SampleLocalOf(i, u);
-		}
 	}
-	// 글로벌 갱신
+
+	// 글로벌 갱신(네 기존 코드 유지)
 	std::function<void(int, const Matrix&)> updateGlobal = [&](int idx, const Matrix& parent) {
 		mNodes[idx].poseGlobal = mNodes[idx].poseLocal * parent;
 		for (int c : mNodes[idx].children)
@@ -324,6 +331,10 @@ void RigidSkeletal::EvaluatePose(double tSec)
 	updateGlobal(mRoot, Matrix::Identity);
 }
 
+// 기존 함수는 루프=true로 위임(호환)
+void RigidSkeletal::EvaluatePose(double tSec) {
+	EvaluatePose(tSec, /*loop*/true);
+}
 // ===== 공통 CB 구조체(튜토리얼 앱과 동일 레이아웃) =====
 struct ConstantBuffer_RS {
 	Matrix mWorld;

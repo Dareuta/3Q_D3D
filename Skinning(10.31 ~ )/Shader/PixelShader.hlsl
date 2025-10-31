@@ -36,7 +36,11 @@ float4 main(PS_INPUT input) : SV_Target
     }    
 
     // ---- 1) 셰이딩 ----
-    float3 albedo   = (useDiffuse  != 0) ? txDiffuse .Sample(samLinear, input.Tex).rgb : float3(1,1,1);
+    //float3 albedo   = (useDiffuse  != 0) ? txDiffuse .Sample(samLinear, input.Tex).rgb : float3(1,1,1);
+    float3 texCol = (useDiffuse != 0) ? txDiffuse.Sample(samLinear, input.Tex).rgb : float3(1, 1, 1);
+    float3 baseCol = (matUseBaseColor != 0) ? matBaseColor.rgb : float3(1, 1, 1);
+    float3 albedo = texCol * baseCol; // 텍스처 없으면 baseCol만 남음
+
    // 스펙 상태 (0=off, 1=use map, 2=no map)
     uint uSpec = useSpecular;
     bool specOn = (uSpec != 0);

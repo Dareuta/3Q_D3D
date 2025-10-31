@@ -113,8 +113,8 @@ private:
 	struct AnimCtrl {
 		bool   play = true;
 		bool   loop = true;
-		double speed = 1.0;
-		double t = 0.0;
+		float  speed = 1.0;
+		double  t = 0.0;
 	};
 
 	AnimCtrl mBoxAC;   // BoxHuman용

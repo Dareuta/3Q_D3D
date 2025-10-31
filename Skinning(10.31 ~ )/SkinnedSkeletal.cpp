@@ -12,6 +12,12 @@
 using namespace DirectX;
 using namespace DirectX::SimpleMath;
 
+static inline double fmod_pos(double x, double m) {
+	if (m <= 0.0) return 0.0;
+	double r = fmod(x, m);
+	return (r < 0.0) ? r + m : r;
+}
+
 static Matrix ToM(const aiMatrix4x4& A)
 {
 	return Matrix(
@@ -121,6 +127,8 @@ std::unique_ptr<SkinnedSkeletal> SkinnedSkeletal::LoadFromFBX(
 	unsigned flags = MakeFlags(/*flipUV*/true, /*leftHanded*/true);
 	const aiScene* sc = imp.ReadFile(std::string(fbxPath.begin(), fbxPath.end()), flags);
 	if (!sc || !sc->mRootNode) throw std::runtime_error("Assimp load failed");
+	
+	up->mGlobalInv = ToM(sc->mRootNode->mTransformation).Invert();
 
 	// --- 1) 노드 트리 ---
 	std::vector<SK_Node> nodes;
@@ -312,28 +320,34 @@ std::unique_ptr<SkinnedSkeletal> SkinnedSkeletal::LoadFromFBX(
 }
 
 // ===== 포즈 평가 =====
-void SkinnedSkeletal::EvaluatePose(double tSec)
+void SkinnedSkeletal::EvaluatePose(double tSec) {
+	EvaluatePose(tSec, /*loop*/true);
+}
+
+void SkinnedSkeletal::EvaluatePose(double tSec, bool loop)
 {
 	if (mClip.duration <= 0.0) {
 		for (auto& n : mNodes) n.poseLocal = n.bindLocal;
 	}
 	else {
-		double T = (mClip.tps > 0.0) ? (tSec * mClip.tps) : tSec * 25.0;
-		double t = fmod(T, mClip.duration);
+		const double tps = (mClip.tps > 0.0) ? mClip.tps : 25.0;
+		const double T = tSec * tps;               // ticks
+		const double t = loop ? fmod_pos(T, mClip.duration)
+			: std::clamp(T, 0.0, mClip.duration);
 		for (size_t i = 0; i < mNodes.size(); ++i)
 			mNodes[i].poseLocal = SampleLocalOf((int)i, t);
 	}
 
-	// 글로벌 업데이트
-	if (mRoot < 0) return;
-	mNodes[mRoot].poseGlobal = mNodes[mRoot].poseLocal;
-	std::function<void(int)> dfs = [&](int u) {
-		for (int v : mNodes[u].children) {
-			mNodes[v].poseGlobal = mNodes[v].poseLocal * mNodes[u].poseGlobal;
-			dfs(v);
-		}
-		};
-	dfs(mRoot);
+	if (mRoot >= 0) {
+		mNodes[mRoot].poseGlobal = mNodes[mRoot].poseLocal;
+		std::function<void(int)> dfs = [&](int u) {
+			for (int v : mNodes[u].children) {
+				mNodes[v].poseGlobal = mNodes[v].poseLocal * mNodes[u].poseGlobal;
+				dfs(v);
+			}
+			};
+		dfs(mRoot);
+	}
 }
 
 // ===== 본 팔레트 업데이트 =====

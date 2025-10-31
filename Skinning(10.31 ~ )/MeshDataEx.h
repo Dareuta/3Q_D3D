@@ -26,6 +26,7 @@ struct SubMeshCPU {
 
 struct MaterialCPU {
 	std::wstring diffuse, normal, specular, emissive, opacity;
+	float diffuseColor[3] = { 1,1,1 };
 };
 
 struct MeshData_PNTT {
