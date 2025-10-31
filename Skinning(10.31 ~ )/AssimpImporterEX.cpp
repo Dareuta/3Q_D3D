@@ -33,6 +33,8 @@ bool AssimpImporterEx::LoadFBX_PNTT_AndMaterials(
 {
 	std::string pathA(pathW.begin(), pathW.end());
 	Assimp::Importer imp;
+	imp.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false); 
+
 	const aiScene* sc = imp.ReadFile(pathA.c_str(), MakeFlags(flipUV, leftHanded));
 	if (!sc || !sc->mRootNode) return false;
 
