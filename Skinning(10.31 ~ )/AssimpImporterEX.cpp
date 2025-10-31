@@ -12,8 +12,10 @@ static unsigned MakeFlags(bool flipUV, bool leftHanded) {
 		| aiProcess_JoinIdenticalVertices
 		| aiProcess_ImproveCacheLocality
 		| aiProcess_SortByPType
-		| aiProcess_CalcTangentSpace   // <- 탠젠트/비탠젠트
-		| aiProcess_GenNormals;        // 노멀 없으면 생성
+		| aiProcess_CalcTangentSpace
+		| aiProcess_GenNormals
+		| aiProcess_Debone             // ← 불필요 본 제거
+		| aiProcess_LimitBoneWeights;  // ← 보통 4개로 제한
 	if (leftHanded) f |= aiProcess_ConvertToLeftHanded;
 	if (flipUV)     f |= aiProcess_FlipUVs;
 	return f;
@@ -33,7 +35,8 @@ bool AssimpImporterEx::LoadFBX_PNTT_AndMaterials(
 {
 	std::string pathA(pathW.begin(), pathW.end());
 	Assimp::Importer imp;
-	imp.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false); 
+	imp.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false); // 이미 OK
+	imp.SetPropertyInteger(AI_CONFIG_PP_LBW_MAX_WEIGHTS, 4);
 
 	const aiScene* sc = imp.ReadFile(pathA.c_str(), MakeFlags(flipUV, leftHanded));
 	if (!sc || !sc->mRootNode) return false;
