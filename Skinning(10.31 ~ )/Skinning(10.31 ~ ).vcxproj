@@ -145,6 +145,8 @@ endlocal
     <ClCompile Include="AssimpImporterEX.cpp" />
     <ClCompile Include="Material.cpp" />
     <ClCompile Include="RigidSkeletal.cpp" />
+    <ClCompile Include="SkinnedMesh.cpp" />
+    <ClCompile Include="SkinnedSkeletal.cpp" />
     <ClCompile Include="StaticMesh.cpp" />
     <ClCompile Include="TutorialApp.cpp" />
     <ClCompile Include="WinMain.cpp" />
@@ -154,6 +156,8 @@ endlocal
     <ClInclude Include="Material.h" />
     <ClInclude Include="MeshDataEx.h" />
     <ClInclude Include="RigidSkeletal.h" />
+    <ClInclude Include="SkinnedMesh.h" />
+    <ClInclude Include="SkinnedSkeletal.h" />
     <ClInclude Include="StaticMesh.h" />
     <ClInclude Include="TutorialApp.h" />
   </ItemGroup>

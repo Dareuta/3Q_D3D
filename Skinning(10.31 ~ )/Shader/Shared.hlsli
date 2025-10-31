@@ -1,215 +1,67 @@
-#ifndef SHARED_HLSLI_INCLUDED // 아직 이 헤더가 정의 안 됐으면
-#define SHARED_HLSLI_INCLUDED // 이제부터 포함했음을 표시
-//#pragma once랑 같은 기능이라고 함
-
-//===========================================
-
-// 공통해더에서 관리하면 바인딩을 동일하게 유지하기 좋음
-// register(b0)처럼, 리소스 바인딩 슬롯 충돌을 막기 편함
-// 상수버퍼 << 말 그대로 읽기만 하는 버퍼임
-
-//===========================================
-// [1] 메인 상수 버퍼
-
-// 상수 버퍼들은 16바이트 정렬이 필요함
-// float4 << 이거 16바이트임
-// float4x4 << 이건 16 * 4 바이트임
-// 즉, 패딩 신경 안써줘서 좋다는거임
-// 단, 다른 구조체가 들어갈때 - float3같은거, 이런거 있을때는 패딩 넣어주는게 좋음
-
-//===========================================
-
+//====================== Shared.hlsli ======================
+// 공용 상수버퍼 (너의 기존 레이아웃 유지)
 cbuffer CB0 : register(b0)
 {
-    //MVP + 역행렬
-    float4x4 World;
-    float4x4 View;
-    float4x4 Projection;
-    float4x4 WorldInvTranspose;
-
-    // 빛의 색과 방향
+    float4x4 World, View, Projection, WorldInvTranspose;
     float4 vLightDir;
     float4 vLightColor;
 }
-
-//===========================================
-// [2] 다른 상수버퍼
-
-// 사용하는 이유는, 업데이트 주기가 달라서임
-// 하나의 상수버퍼를 사용해도 되지만, 
-// 상수버퍼가 갱신되는 이유에 따라 분리해두면 좋음
-// 아래의 값들은, 머터리얼 교체 시에만 바뀌는 값들임
-
-//===========================================
-
 cbuffer BP : register(b1)
 {
-    // w값이 1인건 점, 0인건 방향벡터임(신기하네)
-    // 연산할때, 좌표이동값을 전부 0 곱해버리니까, 이동을 안함
-    // 즉, 이동 안함 = 방향벡터
-    // 이동 함 = 점
-    
-    float4 EyePosW; // (ex, ey, ez, 1) // 그러니까 이건 점임
-    float4 kA; // (ka.r, ka.g, ka.b, 0) // 나머지는 방향 벡터임
-    float4 kSAlpha; // (ks, alpha, 0, 0) 
-    // 이거 사실 8바이트면 하는데, 패딩 채울려고 빈칸까지 포함시킨거임
-    float4 I_ambient; // (Ia.r, Ia.g, Ia.b, 0)
+    float4 EyePosW; // (ex,ey,ez,1)
+    float4 kA; // ambient reflectance
+    float4 kSAlpha; // x: ks, y: shininess (or alphaCut), z,w: unused
+    float4 I_ambient; // ambient light
 }
-
-
-//10.21 추가
-//------------------------------
 cbuffer USE : register(b2)
 {
-    uint useDiffuse;
-    uint useNormal;
-    uint useSpecular;
-    uint useEmissive;
-    
+    uint useDiffuse, useNormal, useSpecular, useEmissive;
     uint useOpacity;
-    float alphaCut; // 알파 임계값
-    float2 _pad; // 정렬용 16바이트
+    float alphaCut;
+    float2 _padUSE;
 }
 
-//------------------------------
+// ★ 스키닝 본 팔레트 (VS에서만 사용) — C++에서 Transpose 해서 올릴 것!
+cbuffer BONES : register(b4)
+{
+    float4x4 gBones[256];
+}
 
-
-//===========================================
-
-// t0, t1, t2 순서대로 보내서 매칭시키는거임
-// 픽셀셰이더에서 텍스처 슬롯 번호를 고정시켜두는 행위
-
-// 선형 뭐시기 이야기가 나오는데, 크게 sRGB랑 Linear가 있음
-// 텍스처를 샘플해서 선형공간에서 계산하고
-// 마지막에 sRGB로 인코딩 하는게 정석임
-
-// 선형 공간은 물리적 밝기와 숫자값이 비례하는 공간임
-// sRGB는 인간의 눈이 밝기를 느끼는 방식에 맞춘 표시 - 저장용임
-// 즉, sRGB에서는 같은 밝기일꺼라고 추론되는 두 숫자가 실제로는 다른 값일 수 있음
-// 이런 이유로, 계산했을때 값이 이상해지는거임
-// 그래서 선형 공간에서 계산을 해야함
-// 오, sRGB에서 0.0 ~ 1.0의 값이 y = x^(2.2) 위에서 그려진다고함
-// 그렇다면...? 정비례하지 않겠네
-
-//===========================================
-// 픽셀 데이터를 담아두고, 샘플러에 어떻게 읽을지 정하는거임
-
-Texture2D txDiffuse : register(t0); // 이게 원본(sRGB)
-Texture2D txNormal : register(t1); // 여기에 노말맵(선형)
-Texture2D txSpecular : register(t2); // 여기에 스펙큘러(선형)
-
-//------------------------------
-Texture2D txEmissive : register(t3); // 에메시브, 오퍼시티 텍스처 슬롯 추가
-Texture2D txOpacity : register(t4);
-//------------------------------
-
-//===========================================
-/*
-SamplerState가 하는 일
-    Point / Linear / (Min/Mag/Mip 조합) / Anisotropic(비등방성 필터링)
-    Wrap / Clamp / Mirror / Border
-    LOD 범위, LOD Bias, 비교 함수(섀도우용) 등    
-
-    바둑판(WRAP) 배치같은거 하는놈이 이놈임
-*/
-
-SamplerState samLinear : register(s0);
-
-//===========================================
-/////////////////////////////////////////////
-//===========================================
-
-// 코드에서 봤던 인풋 레이아웃임
-// 여기 뒤에 붙어있는게 시멘틱인데, 이걸 맞춰주는거임
-// 코드와 1대1로 잘 대응해야함
-// SV_로 시작하는건, 꼭 지켜줘야하지만
-// 그 이외에는 내 마음대로 지어도 괜찮다고 함
-// 그러나, 관습적으로 쓰이는게 있음
-// SV = System Value, GPU 파이프라인에서 예약해둔 특수 목적 값임
-// VS_INPUT에서의 시멘틱은, 코드와 1대1 대응 이외에는 크게 역할이 없는듯?
-
-//===========================================
-
-struct VS_INPUT
+// ===== 정점 입력 (정적 / 스키닝) =====
+struct VS_IN_STATIC
 {
     float3 Pos : POSITION;
-    float3 Norm : NORMAL;
-    
-    float2 Tex : TEXCOORD0;
-    float4 Tang : TEXCOORD1; // +U (좌수 우수도 넣어줘야한다고 함)
-    // (xyz = 탄젠트, w = handedness ±1)    
-    //float3 Bitan : TEXCOORD2; // +V 아낄 수 있는건 다 아껴
+    float3 Nor : NORMAL;
+    float2 Tex : TEXCOORD;
+    float4 Tan : TANGENT; // xyz: tangent, w: handedness
 };
 
-//===========================================
+struct VS_IN_SKINNED
+{
+    float3 Pos : POSITION;
+    float3 Nor : NORMAL;
+    float2 Tex : TEXCOORD;
+    float4 Tan : TANGENT;
+    uint4 Bi : BLENDINDICES; // R8G8B8A8_UINT
+    float4 Bw : BLENDWEIGHT; // float4
+};
 
-// 버텍스 쉐이더에서 넘겨야하는 정보들임 사실상
-// SV_Target은 픽셀 셰이더의 출력 시멘틱임
-// 여기 없구나 ㅋㅋ,,,ㅎㅎ,,,ㅈㅅ!
-// 사실상 셰이더 코드 내부에선 PS_INPUT의 형태로 정보가 이동함
+// ===== VS → PS 공용 출력 =====
+struct VS_OUT
+{
+    float4 SvPos : SV_Position;
+    float3 WorldPos : TEXCOORD0;
+    float3 WorldNor : TEXCOORD1;
+    float3 WorldTan : TEXCOORD2;
+    float2 Tex : TEXCOORD3;
+};
 
-//===========================================
-
+// (PixelShader가 PS_INPUT 이름을 기대한다면 호환을 위해 동일 구조체를 한 번 더 선언)
 struct PS_INPUT
 {
-    float4 PosH : SV_POSITION;
-    // 이게 필수라서(레스터라이져에서 클립/스크린 공간 좌표가 필요함)
-    float3 WorldPos : TEXCOORD0; // 이거 분열된거임
-    
-    float2 Tex : TEXCOORD1;
-    float4 TangentW : TEXCOORD2; // W에 부호가 들어감
-    //float3 BitangentW : TEXCOORD3; 이거 내부에서 외적하면 나와서 아낄 수 있음    
-    float3 NormalW : TEXCOORD3;
-    
+    float4 SvPos : SV_Position;
+    float3 WorldPos : TEXCOORD0;
+    float3 WorldNor : TEXCOORD1;
+    float3 WorldTan : TEXCOORD2;
+    float2 Tex : TEXCOORD3;
 };
-
-//===========================================
-//------------------------------
-// 노말맵 왜곡/뒤집힘 방지하는 탄젠트 재직교화 + TBN 적용 함수
-// PS에서 호출할 예정
-// 그거구나, N이랑 T로, BT구하는거
-
-inline float3 OrthonormalizeTangent(float3 N, float3 T)
-{
-    //그림슈미츠였나 그거임
-    T = normalize(T - N * dot(T, N));
-    float3 B = normalize(cross(N, T)); // N T 외적하면, B나옴
-    T = normalize(cross(B, N));
-    return T;
-}
-
-// flipGreen = 1 일때, G채널 반전하는 용도의 함수(OpenGL계열 노말맵 대응)
-
-inline float3 ApplyNormalMapTS(float3 Nw, float3 Tw, float sign, float2 uv, int flipGreen /*=0*/)
-{
-    float3 Bw = normalize(cross(Nw, Tw)) * sign;
-    Tw = normalize(cross(Bw, Nw)); // 재직교화라고 하는데, 굳이라는 느낌이 조금 있긴 함
-    
-    float3x3 TBN = float3x3(Tw, Bw, Nw);
-    float3 nTS = txNormal.Sample(samLinear, uv).xyz * 2.0f - 1.0f; // 느낌상 보면, -1~1 값을 정규화 시킨거임    
-    if (flipGreen)
-        nTS.g = -nTS.g; // UVG중, G를 뒤집은거임
-    
-    return normalize(mul(nTS, TBN));
-    
-}
-
-// 알파 테스트 헬퍼 함수라는데, 일단 추가해봄
-// 중간에 투명한 부분 알파컷에서 쓴다고 하긴 함
-
-inline void AlphaClip(float2 uv)
-{
-    if (useOpacity != 0)
-    {
-        float a = txOpacity.Sample(samLinear, uv).r; // 관례상? 단일 텍스처는 r값을 가져와서 쓴다고함
-        clip(a - alphaCut); // a < alphaCut이면 픽셀 버림
-    }
-}
-
-
-
-//------------------------------
-
-
-
-#endif // 여기까지가 헤더라는거임(인클루드 가드)

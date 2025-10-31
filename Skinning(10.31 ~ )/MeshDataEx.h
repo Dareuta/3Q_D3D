@@ -11,6 +11,15 @@ struct VertexCPU_PNTT {
 	float tx, ty, tz, tw;
 };
 
+struct VertexCPU_PNTT_BW {
+	float px, py, pz;
+	float nx, ny, nz;
+	float u, v;
+	float tx, ty, tz, tw; // handedness
+	uint8_t  bi[4];       // Bone indices (0~255)
+	float    bw[4];       // Bone weights (정규화)
+};
+
 struct SubMeshCPU {
 	uint32_t baseVertex = 0, indexStart = 0, indexCount = 0, materialIndex = 0;
 };
