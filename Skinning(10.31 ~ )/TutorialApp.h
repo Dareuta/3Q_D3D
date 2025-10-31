@@ -197,7 +197,7 @@ private:
 
 	XformUI     mTreeX, mCharX, mZeldaX;
 	XformUI     mBoxX;
-	XformUI mSkinX;                               
+	XformUI		mSkinX;                               
 	DebugToggles mDbg;
 
 	// 디버그 화살표 위치/스케일

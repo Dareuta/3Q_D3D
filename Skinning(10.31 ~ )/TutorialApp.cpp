@@ -346,53 +346,19 @@ void TutorialApp::OnRender()
 			}
 		};
 
-	if (mSkinRig && mSkinX.enabled)
-	{
-		// 스키닝 셰이더 바인딩
+	auto BindStatic = [&]() {
+		ctx->IASetInputLayout(m_pMeshIL);
+		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		ctx->VSSetShader(m_pMeshVS, nullptr, 0);
+		ctx->PSSetShader(m_pMeshPS, nullptr, 0);
+		};
+
+	auto BindSkinned = [&]() {
 		ctx->IASetInputLayout(m_pSkinnedIL);
+		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		ctx->VSSetShader(m_pSkinnedVS, nullptr, 0);
-		ctx->PSSetShader(m_pMeshPS, nullptr, 0); // PS는 기존 그대로
-
-		// 1) Opaque (깊이 쓰기 ON, 블렌드 OFF)
-		ctx->OMSetDepthStencilState(m_pDSS_Opaque, 0);
-		ctx->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
-		mSkinRig->DrawOpaqueOnly(
-			ctx,
-			ComposeSRT(mSkinX),
-			view, m_Projection,
-			/* cb/use/bone */ m_pConstantBuffer, m_pUseCB, m_pBoneCB,
-			/* light */ vLightDir, vLightColor,
-			/* eye/material */ eye, m_Ka, m_Ks, m_Shininess, m_Ia,
-			/* toggles */ mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive);
-
-		// 2) Cutout (알파 테스트: 깊이 쓰기 ON, 블렌드 OFF)
-		ctx->OMSetDepthStencilState(m_pDSS_Opaque, 0);
-		ctx->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
-		mSkinRig->DrawAlphaCutOnly(
-			ctx,
-			ComposeSRT(mSkinX),
-			view, m_Projection,
-			m_pConstantBuffer, m_pUseCB, m_pBoneCB,
-			vLightDir, vLightColor,
-			eye, m_Ka, m_Ks, m_Shininess, m_Ia,
-			mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive);
-
-		// 3) Transparent (깊이 write OFF, 직알파 블렌드)
-		ctx->OMSetDepthStencilState(m_pDSS_Trans, 0);       // DepthWrite OFF
-		float blendFactor[4] = { 0,0,0,0 };
-		ctx->OMSetBlendState(m_pBS_Alpha, blendFactor, 0xFFFFFFFF);
-		mSkinRig->DrawTransparentOnly(
-			ctx,
-			ComposeSRT(mSkinX),
-			view, m_Projection,
-			m_pConstantBuffer, m_pUseCB, m_pBoneCB,
-			vLightDir, vLightColor,
-			eye, m_Ka, m_Ks, m_Shininess, m_Ia,
-			mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive);
-
-		// 상태 복귀는 네 기존 코드 흐름에 맞춰 처리
-	}
-
+		ctx->PSSetShader(m_pMeshPS, nullptr, 0);
+		};
 
 	// ===== A) SKYBOX FIRST =====
 	if (mDbg.showSky) {
@@ -459,11 +425,10 @@ void TutorialApp::OnRender()
 		}
 
 		if (mDbg.showOpaque) {
+			BindStatic();
 			if (mTreeX.enabled)  DrawOpaqueOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
 			if (mCharX.enabled)  DrawOpaqueOnly(gChar, gCharMtls, ComposeSRT(mCharX));
 			if (mZeldaX.enabled) DrawOpaqueOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
-
-			// ▼▼ 여기 교체 (StaticMesh -> RigidSkeletal)
 			if (mBoxRig && mBoxX.enabled) {
 				mBoxRig->DrawOpaqueOnly(
 					m_pDeviceContext,
@@ -476,7 +441,19 @@ void TutorialApp::OnRender()
 					/* disable toggles */    mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
 				);
 			}
-
+			if (mSkinRig && mSkinX.enabled) {
+				BindSkinned();
+				mSkinRig->DrawOpaqueOnly(
+					ctx,
+					ComposeSRT(mSkinX),
+					view, m_Projection,
+					m_pConstantBuffer, m_pUseCB, m_pBoneCB,
+					vLightDir, vLightColor,
+					eye, m_Ka, m_Ks, m_Shininess, m_Ia,
+					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
+				);
+				BindStatic();
+			}
 		}
 	}
 
@@ -506,6 +483,7 @@ void TutorialApp::OnRender()
 		if (mDbg.cullNone && m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS);
 
 		if (mDbg.showTransparent) {
+			BindStatic();
 			if (mTreeX.enabled)  DrawAlphaCutOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
 			if (mCharX.enabled)  DrawAlphaCutOnly(gChar, gCharMtls, ComposeSRT(mCharX));
 			if (mZeldaX.enabled) DrawAlphaCutOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
@@ -521,6 +499,20 @@ void TutorialApp::OnRender()
 					/* eye/material */    eye, m_Ka, m_Ks, m_Shininess, m_Ia,
 					/* toggles */         mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
 				);
+			}
+
+			if (mSkinRig && mSkinX.enabled) {
+				BindSkinned();
+				mSkinRig->DrawAlphaCutOnly(
+					ctx,
+					ComposeSRT(mSkinX),
+					view, m_Projection,
+					m_pConstantBuffer, m_pUseCB, m_pBoneCB,
+					vLightDir, vLightColor,
+					eye, m_Ka, m_Ks, m_Shininess, m_Ia,
+					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
+				);
+				BindStatic();
 			}
 		}
 	}
@@ -543,11 +535,11 @@ void TutorialApp::OnRender()
 		}
 
 		if (mDbg.showTransparent) {
+			BindStatic();
 			if (mTreeX.enabled)  DrawTransparentOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
 			if (mCharX.enabled)  DrawTransparentOnly(gChar, gCharMtls, ComposeSRT(mCharX));
 			if (mZeldaX.enabled) DrawTransparentOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
 
-			// ▼▼ 교체
 			if (mBoxRig && mBoxX.enabled) {
 				mBoxRig->DrawTransparentOnly(
 					m_pDeviceContext,
@@ -558,6 +550,20 @@ void TutorialApp::OnRender()
 					/* eye/material */    eye, m_Ka, m_Ks, m_Shininess, m_Ia,
 					/* toggles */         mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
 				);
+			}
+
+			if (mSkinRig && mSkinX.enabled) {
+				BindSkinned();
+				mSkinRig->DrawTransparentOnly(
+					ctx,
+					ComposeSRT(mSkinX),
+					view, m_Projection,
+					m_pConstantBuffer, m_pUseCB, m_pBoneCB,
+					vLightDir, vLightColor,
+					eye, m_Ka, m_Ks, m_Shininess, m_Ia,
+					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
+				);
+				BindStatic();
 			}
 
 			m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
@@ -818,14 +824,17 @@ bool TutorialApp::InitScene()
 	mTreeX.scl = { 100,100,100 };
 	mCharX.pos = { 100, -150, 100 };  mCharX.initPos = mCharX.pos;
 	mZeldaX.pos = { 0, -150, 250 };  mZeldaX.initPos = mZeldaX.pos;
-	mBoxX.pos = { 0, -300, 500 };
+	mBoxX.pos = { -200, -300, 400 };
+	mSkinX.pos = { 200, -150, 400 };
 
-	mTreeX.enabled = mCharX.enabled = mZeldaX.enabled = false; // 초기 설정 숨기기
+	mTreeX.enabled = mCharX.enabled = mZeldaX.enabled = mBoxX.enabled = false; // 초기 설정 숨기기
 
 	mTreeX.initScl = mTreeX.scl; mCharX.initScl = mCharX.scl; mZeldaX.initScl = mZeldaX.scl;
 	mTreeX.initRotD = mTreeX.rotD; mCharX.initRotD = mCharX.rotD; mZeldaX.initRotD = mZeldaX.rotD;
 
 	mBoxX.initScl = mBoxX.scl;	mBoxX.initRotD = mBoxX.rotD; mBoxX.initPos = mBoxX.pos;
+	mSkinX.initScl = mSkinX.scl; mSkinX.initRotD = mSkinX.rotD; mSkinX.initPos = mSkinX.pos;
+	
 	// PS b3: dbgColor
 	{
 		D3D11_BUFFER_DESC bd{};
@@ -912,10 +921,6 @@ bool TutorialApp::InitScene()
 				L"../Resource/Skinning/SkinningTest.fbx",   // 너의 리소스 경로에 맞춰 조정
 				L"../Resource/Skinning/"                    // 텍스처 루트
 			);
-		
-			mSkinX.enabled = true;
-			mSkinX.pos = Vector3(0, 0, 0);
-			mSkinX.scl = Vector3(1, 1, 1);
 		}
 	}
 	// === Rasterizer states ===
@@ -1007,7 +1012,7 @@ bool TutorialApp::InitScene()
 	//======================  SKYBOX: Texture / Sampler  ======================
 	{
 		HR_T(CreateDDSTextureFromFile(m_pDevice,
-			L"../Resource/Hanako.dds", nullptr, &m_pSkySRV));
+			L"../Resource/Cubemap.dds", nullptr, &m_pSkySRV));
 
 		D3D11_SAMPLER_DESC sd{}; // clamp가 세렝게티
 		sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -1222,6 +1227,8 @@ bool TutorialApp::InitImGUI()
 
 	ImGui_ImplWin32_Init(m_hWnd);
 	ImGui_ImplDX11_Init(this->m_pDevice, this->m_pDeviceContext);
+
+
 	return true;
 }
 
@@ -1244,7 +1251,7 @@ void TutorialApp::UpdateImGUI()
 	if (ImGui::Begin(u8"임꾸이(IMGUI)"))
 	{
 		// 상단 상태
-		ImGui::Text("FPS: %.1f (%.3f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);	
+		ImGui::Text("FPS: %.1f (%.3f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
 		ImGui::Separator();
 
 		// 스냅샷 1회 저장
@@ -1270,7 +1277,7 @@ void TutorialApp::UpdateImGUI()
 		}
 
 		// === Camera ===
-		if (ImGui::CollapsingHeader(u8"Camera", ImGuiTreeNodeFlags_DefaultOpen))
+		if (ImGui::CollapsingHeader(u8"Camera"))
 		{
 			ImGui::SliderFloat("FOV (deg)", &m_FovDegree, 10.0f, 120.0f, "%.1f");
 			ImGui::DragFloat("Near", &m_Near, 0.001f, 0.0001f, 10.0f, "%.5f");
@@ -1282,7 +1289,7 @@ void TutorialApp::UpdateImGUI()
 		}
 
 		// === Lighting ===
-		if (ImGui::CollapsingHeader(u8"Lighting", ImGuiTreeNodeFlags_DefaultOpen))
+		if (ImGui::CollapsingHeader(u8"Lighting"))
 		{
 			ImGui::SliderAngle("Yaw", &m_LightYaw, -180.0f, 180.0f);
 			ImGui::SliderAngle("Pitch", &m_LightPitch, -89.0f, 89.0f);
@@ -1297,7 +1304,7 @@ void TutorialApp::UpdateImGUI()
 		}
 
 		// === Material (Blinn-Phong) ===
-		if (ImGui::CollapsingHeader(u8"Material", ImGuiTreeNodeFlags_DefaultOpen))
+		if (ImGui::CollapsingHeader(u8"Material"))
 		{
 			ImGui::ColorEdit3("I_a (ambient light)", (float*)&m_Ia);
 			ImGui::ColorEdit3("k_a (ambient refl.)", (float*)&m_Ka);
@@ -1309,7 +1316,7 @@ void TutorialApp::UpdateImGUI()
 		}
 
 		// === Models ===
-		if (ImGui::CollapsingHeader(u8"Models", ImGuiTreeNodeFlags_DefaultOpen))
+		if (ImGui::CollapsingHeader(u8"Models"))
 		{
 			auto ModelUI = [&](const char* name, XformUI& xf) {
 				if (ImGui::TreeNode(name)) {
@@ -1354,10 +1361,10 @@ void TutorialApp::UpdateImGUI()
 		if (ImGui::CollapsingHeader(u8"BoxHuman (RigidSkeletal)"))
 		{
 			// Transform
-			ImGui::Checkbox("Enabled", &mBoxX.enabled);
-			ImGui::DragFloat3("Position", (float*)&mBoxX.pos, 0.1f, -10000.0f, 10000.0f);
-			ImGui::DragFloat3("Rotation (deg XYZ)", (float*)&mBoxX.rotD, 0.5f, -720.0f, 720.0f);
-			ImGui::DragFloat3("Scale", (float*)&mBoxX.scl, 0.01f, 0.0001f, 1000.0f);
+			ImGui::Checkbox("Enabled##Box", &mBoxX.enabled);
+			ImGui::DragFloat3("Position##Box", (float*)&mBoxX.pos, 0.1f, -10000.0f, 10000.0f);
+			ImGui::DragFloat3("Rotation (deg XYZ)##Box", (float*)&mBoxX.rotD, 0.5f, -720.0f, 720.0f);
+			ImGui::DragFloat3("Scale##Box", (float*)&mBoxX.scl, 0.01f, 0.0001f, 1000.0f);
 			if (ImGui::Button(u8"트랜스폼 초기화")) {
 				mBoxX.pos = mBoxX.initPos; mBoxX.rotD = mBoxX.initRotD; mBoxX.scl = mBoxX.initScl; mBoxX.enabled = true;
 			}
@@ -1425,30 +1432,19 @@ void TutorialApp::UpdateImGUI()
 			ImGui::Checkbox("Show Transparent", &mDbg.showTransparent);
 
 			ImGui::Separator();
+
 			ImGui::Checkbox("Wireframe", &mDbg.wireframe); ImGui::SameLine();
 			ImGui::Checkbox("Cull None", &mDbg.cullNone);
 			ImGui::Checkbox("Depth Write/Test OFF (mesh)", &mDbg.depthWriteOff);
 			ImGui::Checkbox("Freeze Time", &mDbg.freezeTime); // 이거 작동 안함
 
 			ImGui::Separator();
-			ImGui::Text("Texture Map Overrides");
-			ImGui::Checkbox("Disable Normal", &mDbg.disableNormal);   ImGui::SameLine();
-			ImGui::Checkbox("Disable Specular", &mDbg.disableSpecular); ImGui::SameLine();
-			ImGui::Checkbox("Disable Emissive", &mDbg.disableEmissive);
 
+			ImGui::Checkbox("Disable Normal", &mDbg.disableNormal);
+			ImGui::Checkbox("Disable Specular", &mDbg.disableSpecular);
+			ImGui::Checkbox("Disable Emissive", &mDbg.disableEmissive);
 			ImGui::Checkbox("Force AlphaClip", &mDbg.forceAlphaClip);
 			ImGui::DragFloat("alphaCut", &mDbg.alphaCut, 0.01f, 0.0f, 1.0f);
-
-			if (ImGui::CollapsingHeader(u8"Material Debug (flags)"))
-			{
-				ImGui::TextDisabled("Opaque/Cutout/Transparent 패스는 실제 드로우 코드에서 분기됨.");
-				ImGui::Checkbox("Disable Normal", &mDbg.disableNormal);
-				ImGui::Checkbox("Disable Specular", &mDbg.disableSpecular);
-				ImGui::Checkbox("Disable Emissive", &mDbg.disableEmissive);
-				ImGui::Checkbox("Force AlphaClip", &mDbg.forceAlphaClip);
-				ImGui::DragFloat("alphaCut", &mDbg.alphaCut, 0.01f, 0.0f, 1.0f);
-			}
-
 
 			if (ImGui::Button(u8"디버그 토글 초기화")) {
 				mDbg = DebugToggles(); // 리셋
