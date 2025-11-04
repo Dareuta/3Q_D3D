@@ -24,7 +24,7 @@
     <ProjectGuid>{0a8d309e-0932-4f0b-8e95-fff7785b61b6}</ProjectGuid>
     <RootNamespace>StaticMesh</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>[7] StaticMesh(10.13 ~ )</ProjectName>
+    <ProjectName>[07] StaticMesh(10.13 ~ )</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">

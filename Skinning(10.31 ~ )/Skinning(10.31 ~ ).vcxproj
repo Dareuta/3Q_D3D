@@ -24,7 +24,7 @@
     <ProjectGuid>{9a403aa3-32d2-43e9-8b8b-68f21784050d}</ProjectGuid>
     <RootNamespace>Skinning1031</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>[9] Skinning(10.31 ~ )</ProjectName>
+    <ProjectName>[09] Skinning(10.31 ~ )</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">

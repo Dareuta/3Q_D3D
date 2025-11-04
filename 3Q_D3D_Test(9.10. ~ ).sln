@@ -3,25 +3,27 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.13.35931.197
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[1] D3D_Test(9.10. ~ )", "3Q_D3D_Test(9.10. ~ )\3Q_D3D_Test(9.10. ~ ).vcxproj", "{2A1A8192-5F2F-4B4A-B541-640D21763F1D}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[01] D3D_Test(9.10. ~ )", "3Q_D3D_Test(9.10. ~ )\3Q_D3D_Test(9.10. ~ ).vcxproj", "{2A1A8192-5F2F-4B4A-B541-640D21763F1D}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[0] D3DCore", "D3DCore\D3DCore.vcxproj", "{8B634B70-F789-4B54-8D7A-42BFEDD61AF1}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[00] D3DCore", "D3DCore\D3DCore.vcxproj", "{8B634B70-F789-4B54-8D7A-42BFEDD61AF1}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[2] Transform(09.17 ~ )", "Transform(09.17 ~ )\Transform(09.17 ~ ).vcxproj", "{DEE4AC5B-0D4F-4762-907D-5DF5595A7DB3}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[02] Transform(09.17 ~ )", "Transform(09.17 ~ )\Transform(09.17 ~ ).vcxproj", "{DEE4AC5B-0D4F-4762-907D-5DF5595A7DB3}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[3] Directional Lighting(9.19 ~ )", "TextureMapping(9.19 ~ )\TextureMapping(9.19 ~ ).vcxproj", "{C51EE43C-1AAA-4E65-AA0B-144B54B3D407}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[03] Directional Lighting(9.19 ~ )", "TextureMapping(9.19 ~ )\TextureMapping(9.19 ~ ).vcxproj", "{C51EE43C-1AAA-4E65-AA0B-144B54B3D407}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[4] SkyBox(9.25 ~ )", "SkyBox(9.25 ~ )\SkyBox(9.25 ~ ).vcxproj", "{FD00D629-C2BE-4BC4-8DF5-98E7BD00BCC0}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[04] SkyBox(9.25 ~ )", "SkyBox(9.25 ~ )\SkyBox(9.25 ~ ).vcxproj", "{FD00D629-C2BE-4BC4-8DF5-98E7BD00BCC0}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[5] BlinnPhong(9.29 ~ )", "BlinnPhong(9.29 ~ )\BlinnPhong(9.29 ~ ).vcxproj", "{D0E840DA-6389-4013-91DE-A2BAB1981509}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[05] BlinnPhong(9.29 ~ )", "BlinnPhong(9.29 ~ )\BlinnPhong(9.29 ~ ).vcxproj", "{D0E840DA-6389-4013-91DE-A2BAB1981509}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[6] NormalMap(9.30 ~ )", "NormalMap\NormalMap.vcxproj", "{728342BA-D7EE-4C54-8D88-726E5A46C4C4}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[06] NormalMap(9.30 ~ )", "NormalMap\NormalMap.vcxproj", "{728342BA-D7EE-4C54-8D88-726E5A46C4C4}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[7] StaticMesh(10.13 ~ )", "StaticMesh\StaticMesh.vcxproj", "{0A8D309E-0932-4F0B-8E95-FFF7785B61B6}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[07] StaticMesh(10.13 ~ )", "StaticMesh\StaticMesh.vcxproj", "{0A8D309E-0932-4F0B-8E95-FFF7785B61B6}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[8] SkeletonAnimation(10.28 ~ )", "SkeletonAnimation(10.28 ~ )\SkeletonAnimation(10.28 ~ ).vcxproj", "{EC02AC46-F027-465A-9053-1EC76D22FA1D}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[08] SkeletonAnimation(10.28 ~ )", "SkeletonAnimation(10.28 ~ )\SkeletonAnimation(10.28 ~ ).vcxproj", "{EC02AC46-F027-465A-9053-1EC76D22FA1D}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[9] Skinning(10.31 ~ )", "Skinning(10.31 ~ )\Skinning(10.31 ~ ).vcxproj", "{9A403AA3-32D2-43E9-8B8B-68F21784050D}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[09] Skinning(10.31 ~ )", "Skinning(10.31 ~ )\Skinning(10.31 ~ ).vcxproj", "{9A403AA3-32D2-43E9-8B8B-68F21784050D}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "[10] Shadow(11.05 ~ )", "Shadow(11.05 ~ )\Shadow(11.05 ~ ).vcxproj", "{1FCBA6CC-D1DF-4A2D-A63C-E66F8790EAEB}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -111,6 +113,14 @@ Global
 		{9A403AA3-32D2-43E9-8B8B-68F21784050D}.Release|x64.Build.0 = Release|x64
 		{9A403AA3-32D2-43E9-8B8B-68F21784050D}.Release|x86.ActiveCfg = Release|Win32
 		{9A403AA3-32D2-43E9-8B8B-68F21784050D}.Release|x86.Build.0 = Release|Win32
+		{1FCBA6CC-D1DF-4A2D-A63C-E66F8790EAEB}.Debug|x64.ActiveCfg = Debug|x64
+		{1FCBA6CC-D1DF-4A2D-A63C-E66F8790EAEB}.Debug|x64.Build.0 = Debug|x64
+		{1FCBA6CC-D1DF-4A2D-A63C-E66F8790EAEB}.Debug|x86.ActiveCfg = Debug|Win32
+		{1FCBA6CC-D1DF-4A2D-A63C-E66F8790EAEB}.Debug|x86.Build.0 = Debug|Win32
+		{1FCBA6CC-D1DF-4A2D-A63C-E66F8790EAEB}.Release|x64.ActiveCfg = Release|x64
+		{1FCBA6CC-D1DF-4A2D-A63C-E66F8790EAEB}.Release|x64.Build.0 = Release|x64
+		{1FCBA6CC-D1DF-4A2D-A63C-E66F8790EAEB}.Release|x86.ActiveCfg = Release|Win32
+		{1FCBA6CC-D1DF-4A2D-A63C-E66F8790EAEB}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
