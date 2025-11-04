@@ -361,7 +361,7 @@ void SkinnedSkeletal::UpdateBonePalette(ID3D11DeviceContext* ctx, ID3D11Buffer* 
 		mBonePalette[i] = XMMatrixTranspose(M);
 	}
 	if (!mBonePalette.empty())
-		ctx->UpdateSubresource(boneCB, 0, nullptr, mBonePalette.data(), 0, 0);
+		ctx->UpdateSubresource(boneCB, 0, nullptr, mBonePalette.data(), 0, 0); // 여기 왜터지는지 몰?루 다시하면 잘됨
 	ctx->VSSetConstantBuffers(4, 1, &boneCB); // b4
 }
 
