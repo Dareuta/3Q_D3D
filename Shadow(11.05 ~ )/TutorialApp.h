@@ -49,6 +49,21 @@ private:
 	bool InitScene();
 	void UninitScene();
 
+
+	bool CreateShadowResources(ID3D11Device* dev);
+	bool CreateDepthOnlyShaders(ID3D11Device* dev);
+	void BuildLightCameraAndUpload(ID3D11DeviceContext* ctx,
+		const DirectX::SimpleMath::Vector3& camPos,
+		const DirectX::SimpleMath::Vector3& camForward,
+		const DirectX::SimpleMath::Vector3& lightDir_unit,
+		float focusDist, float lightDist);
+	void RenderShadowPass(ID3D11DeviceContext* ctx,
+		const DirectX::SimpleMath::Vector3& camPos,
+		const DirectX::SimpleMath::Vector3& camForward,
+		const DirectX::SimpleMath::Vector3& lightDir_unit,
+		float focusDist, float lightDist);
+
+
 	// ===== D3D 핵심 객체 =====
 	ID3D11Device* m_pDevice = nullptr;
 	ID3D11DeviceContext* m_pDeviceContext = nullptr;
@@ -108,6 +123,39 @@ private:
 	ID3D11Buffer* m_pBoneCB = nullptr;   // VS b4: bone palette
 
 	std::unique_ptr<SkinnedSkeletal> mSkinRig;   // SkinningTest.fbx
+
+	//=======================
+	// ===== Shadow map resources =====
+	Microsoft::WRL::ComPtr<ID3D11Texture2D>          mShadowTex;
+	Microsoft::WRL::ComPtr<ID3D11DepthStencilView>   mShadowDSV;
+	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> mShadowSRV;
+	Microsoft::WRL::ComPtr<ID3D11SamplerState>       mSamShadowCmp; // s1 (Comparison)
+
+	Microsoft::WRL::ComPtr<ID3D11RasterizerState>    mRS_ShadowBias;
+	D3D11_VIEWPORT                                   mShadowVP{};
+
+	// ===== Depth-only shaders & IL =====
+	Microsoft::WRL::ComPtr<ID3D11VertexShader>       mVS_Depth;          // Static
+	Microsoft::WRL::ComPtr<ID3D11VertexShader>       mVS_DepthSkinned;   // Skinned
+	Microsoft::WRL::ComPtr<ID3D11PixelShader>        mPS_Depth;          // Alpha-cut clip()
+	Microsoft::WRL::ComPtr<ID3D11InputLayout>        mIL_PNTT;           // VertexCPU_PNTT
+	Microsoft::WRL::ComPtr<ID3D11InputLayout>        mIL_PNTT_BW;        // VertexCPU_PNTT_BW
+
+	// ===== Shadow constant buffer (b6) =====
+	Microsoft::WRL::ComPtr<ID3D11Buffer>             mCB_Shadow; // Shared.hlsli: LightViewProj, ShadowParams
+
+	// 라이트 카메라 행렬(프레임마다 계산)
+	DirectX::SimpleMath::Matrix mLightView = DirectX::SimpleMath::Matrix::Identity;
+	DirectX::SimpleMath::Matrix mLightProj = DirectX::SimpleMath::Matrix::Identity;
+
+	// 설정값
+	UINT  mShadowW = 2048, mShadowH = 2048, mShadowCmpBias = 0.0015f;
+	float mShadowFovY = DirectX::XMConvertToRadians(60.0f); // 원근 투영
+	float mShadowNear = 1.0f, mShadowFar = 200.0f;
+	float mShadowDepthBias = 1000.0f;        // RS DepthBias
+	float mShadowSlopeBias = 1.5f;          // RS SlopeScaledDepthBias
+	float mShadowAlphaCut = 0.5f;          // PS에서 clip 임계값
+
 
 	// TutorialApp.h
 	struct AnimCtrl {

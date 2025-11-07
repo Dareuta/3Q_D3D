@@ -87,6 +87,17 @@ public:
         const Vector3& eyePos,
         const Vector3& kA, float ks, float shininess, const Vector3& Ia,
         bool disableNormal, bool disableSpecular, bool disableEmissive);
+    void DrawDepthOnly(
+        ID3D11DeviceContext* ctx,
+        const DirectX::SimpleMath::Matrix& worldModel,
+        const DirectX::SimpleMath::Matrix& lightView,
+        const DirectX::SimpleMath::Matrix& lightProj,
+        ID3D11Buffer* cb0, ID3D11Buffer* useCB, ID3D11Buffer* boneCB,
+        ID3D11VertexShader* vsDepthSkinned,
+        ID3D11PixelShader* psDepth,
+        ID3D11InputLayout* ilPNTT_BW,
+        float alphaCut);
+
 
     // 본 팔레트 계산 후 boneCB에 업로드
     void UpdateBonePalette(ID3D11DeviceContext* ctx, ID3D11Buffer* boneCB, const Matrix& worldModel);

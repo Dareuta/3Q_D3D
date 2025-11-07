@@ -109,6 +109,19 @@ public:
         const DirectX::SimpleMath::Vector3& Ia,
         bool disableNormal, bool disableSpecular, bool disableEmissive);
 
+    void DrawDepthOnly(
+        ID3D11DeviceContext* ctx,
+        const DirectX::SimpleMath::Matrix& worldModel,
+        const DirectX::SimpleMath::Matrix& lightView,
+        const DirectX::SimpleMath::Matrix& lightProj,
+        ID3D11Buffer* cb0,        // b0(월드/뷰/프로젝션)
+        ID3D11Buffer* useCB,      // b2(UseCB) — alphaCut용
+        ID3D11VertexShader* vsDepth,
+        ID3D11PixelShader* psDepth,
+        ID3D11InputLayout* ilPNTT,
+        float alphaCut);
+
+
 public:
     // --- IMGUI/타이밍용 간단 Getter ---
     double GetClipDurationTicks() const noexcept { return mClip.duration; }

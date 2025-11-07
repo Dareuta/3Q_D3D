@@ -492,3 +492,60 @@ void RigidSkeletal::DrawTransparentOnly(
 		}
 	}
 }
+
+void RigidSkeletal::DrawDepthOnly(
+	ID3D11DeviceContext* ctx,
+	const Matrix& worldModel,
+	const Matrix& lightView, const Matrix& lightProj,
+	ID3D11Buffer* cb0, ID3D11Buffer* useCB,
+	ID3D11VertexShader* vsDepth,
+	ID3D11PixelShader* psDepth,
+	ID3D11InputLayout* ilPNTT,
+	float alphaCut)
+{
+	// 공용 CB 구조 그대로 재사용
+	struct ConstantBuffer_RS {
+		Matrix mWorld, mView, mProjection, mWorldInvTranspose;
+		Vector4 vLightDir, vLightColor;
+	};
+
+	ctx->IASetInputLayout(ilPNTT);
+	ctx->VSSetShader(vsDepth, nullptr, 0);
+	ctx->PSSetShader(psDepth, nullptr, 0);
+
+	for (const auto& part : mParts)
+	{
+		const auto& ranges = part.mesh.Ranges();
+		const Matrix world = mNodes[part.ownerNode].poseGlobal * worldModel;
+
+		ConstantBuffer_RS cb{};
+		cb.mWorld = XMMatrixTranspose(world);
+		cb.mView = XMMatrixTranspose(lightView);
+		cb.mProjection = XMMatrixTranspose(lightProj);
+		cb.mWorldInvTranspose = world.Invert();
+		ctx->UpdateSubresource(cb0, 0, nullptr, &cb, 0, 0);
+		ctx->VSSetConstantBuffers(0, 1, &cb0);
+
+		for (size_t i = 0; i < ranges.size(); ++i) {
+			const auto& r = ranges[i];
+			const auto& mat = part.materials[r.materialIndex];
+
+			// UseCB: alpha cut만 사용 (PS에서 clip)
+			struct UseCB_ {
+				UINT useDiffuse, useNormal, useSpecular, useEmissive;
+				UINT useOpacity; float alphaCut; float pad[2];
+			} use{};
+			use.useOpacity = mat.hasOpacity ? 1u : 0u;
+			use.alphaCut = alphaCut;
+
+			ctx->UpdateSubresource(useCB, 0, nullptr, &use, 0, 0);
+			ctx->PSSetConstantBuffers(2, 1, &useCB);
+
+			// txOpacity(t4) 필요하므로 머티리얼 바인딩(다른 텍스처가 같이 바인딩되어도 무방)
+			mat.Bind(ctx);
+			part.mesh.DrawSubmesh(ctx, (UINT)i);
+		}
+		MaterialGPU::Unbind(ctx);
+	}
+}
+

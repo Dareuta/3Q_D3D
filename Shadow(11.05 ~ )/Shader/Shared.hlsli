@@ -74,6 +74,18 @@ struct PS_INPUT
     float3 NormalW : TEXCOORD3;
 };
 
+// ===== Shadow Map (PS: t5/s1, CB: b6) =====
+Texture2D<float> txShadow : register(t5);
+
+// 깊이 비교 전용 샘플러(하드웨어 PCF 사용 가능)
+SamplerComparisonState samShadow : register(s1);
+
+cbuffer ShadowCB : register(b6)
+{
+    float4x4 LightViewProj; // 라이트 뷰-프로젝션 (C++에서 Transpose 해서 넣기)
+    float4 ShadowParams; // x: depthBias, y: 1/texW, z: 1/texH, w: 예약
+}
+
 // ===== Helpers
 inline float3 OrthonormalizeTangent(float3 N, float3 T)
 {

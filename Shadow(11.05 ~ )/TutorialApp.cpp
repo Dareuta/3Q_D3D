@@ -9,7 +9,6 @@
 #include <d3dcompiler.h>
 #include <Directxtk/DDSTextureLoader.h>  // CreateDDSTextureFromFile
 
-
 #pragma comment (lib, "d3d11.lib")
 #pragma comment(lib,"d3dcompiler.lib")
 
@@ -97,6 +96,163 @@ static void AnimUI(const char* label,
 		ImGui::TreePop();
 	}
 }
+
+bool TutorialApp::CreateShadowResources(ID3D11Device* dev)
+{
+	// 1) 텍스처 + DSV + SRV (R32 typeless)
+	D3D11_TEXTURE2D_DESC td{};
+	td.Width = mShadowW; td.Height = mShadowH;
+	td.MipLevels = 1; td.ArraySize = 1;
+	td.Format = DXGI_FORMAT_R32_TYPELESS;
+	td.SampleDesc.Count = 1;
+	td.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+	if (FAILED(dev->CreateTexture2D(&td, nullptr, mShadowTex.GetAddressOf()))) return false;
+
+	D3D11_DEPTH_STENCIL_VIEW_DESC dsvd{};
+	dsvd.Format = DXGI_FORMAT_D32_FLOAT;
+	dsvd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+	if (FAILED(dev->CreateDepthStencilView(mShadowTex.Get(), &dsvd, mShadowDSV.GetAddressOf()))) return false;
+
+	D3D11_SHADER_RESOURCE_VIEW_DESC srvd{};
+	srvd.Format = DXGI_FORMAT_R32_FLOAT;
+	srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+	srvd.Texture2D.MipLevels = 1;
+	if (FAILED(dev->CreateShaderResourceView(mShadowTex.Get(), &srvd, mShadowSRV.GetAddressOf()))) return false;
+
+	// 2) 비교 샘플러 (s1)
+	D3D11_SAMPLER_DESC sd{};
+	sd.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
+	sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+	sd.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL; // 일반적 설정
+	sd.MinLOD = 0; sd.MaxLOD = D3D11_FLOAT32_MAX;
+	if (FAILED(dev->CreateSamplerState(&sd, mSamShadowCmp.GetAddressOf()))) return false;
+
+	// 3) 깊이 바이어스용 RS
+	D3D11_RASTERIZER_DESC rs{};
+	rs.FillMode = D3D11_FILL_SOLID;
+	rs.CullMode = D3D11_CULL_BACK;
+	rs.DepthClipEnable = TRUE;
+	rs.DepthBias = (INT)mShadowDepthBias;     // 1000 정도 스타트
+	rs.SlopeScaledDepthBias = mShadowSlopeBias;
+	rs.DepthBiasClamp = 0.0f;
+	if (FAILED(dev->CreateRasterizerState(&rs, mRS_ShadowBias.GetAddressOf()))) return false;
+
+	// 4) 뷰포트
+	mShadowVP = { 0,0,(float)mShadowW,(float)mShadowH, 0.0f,1.0f };
+
+	// 5) ShadowCB (b6)
+	D3D11_BUFFER_DESC cbd{};
+	cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	cbd.Usage = D3D11_USAGE_DEFAULT;
+	cbd.ByteWidth = sizeof(DirectX::XMFLOAT4X4) + sizeof(DirectX::XMFLOAT4); // LightViewProj + ShadowParams
+	return SUCCEEDED(dev->CreateBuffer(&cbd, nullptr, mCB_Shadow.GetAddressOf()));
+}
+
+bool TutorialApp::CreateDepthOnlyShaders(ID3D11Device* dev)
+{
+	using Microsoft::WRL::ComPtr;
+	ComPtr<ID3DBlob> vsb, vsb2, psb;
+
+	HR_T(CompileShaderFromFile(L"Shader/DepthOnly_VS.hlsl", "main", "vs_5_0", vsb.GetAddressOf()));
+	HR_T(CompileShaderFromFile(L"Shader/DepthOnly_SkinnedVS.hlsl", "main", "vs_5_0", vsb2.GetAddressOf()));
+	HR_T(CompileShaderFromFile(L"Shader/DepthOnly_PS.hlsl", "main", "ps_5_0", psb.GetAddressOf()));
+
+	HR_T(dev->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, mVS_Depth.GetAddressOf()));
+	HR_T(dev->CreateVertexShader(vsb2->GetBufferPointer(), vsb2->GetBufferSize(), nullptr, mVS_DepthSkinned.GetAddressOf()));
+	HR_T(dev->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, mPS_Depth.GetAddressOf()));
+
+	// IL for VertexCPU_PNTT
+	D3D11_INPUT_ELEMENT_DESC ilPNTT[] = {
+		{"POSITION",0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+		{"NORMAL",  0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
+		{"TEXCOORD",0, DXGI_FORMAT_R32G32_FLOAT,       0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0},
+		{"TANGENT", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0},
+	};
+	HR_T(dev->CreateInputLayout(ilPNTT, _countof(ilPNTT),
+		vsb->GetBufferPointer(), vsb->GetBufferSize(), mIL_PNTT.GetAddressOf()));
+
+	// IL for VertexCPU_PNTT_BW
+	D3D11_INPUT_ELEMENT_DESC ilBW[] = {
+		{"POSITION",     0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+		{"NORMAL",       0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
+		{"TEXCOORD",     0, DXGI_FORMAT_R32G32_FLOAT,       0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0},
+		{"TANGENT",      0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0},
+		{"BLENDINDICES", 0, DXGI_FORMAT_R8G8B8A8_UINT,      0, 48, D3D11_INPUT_PER_VERTEX_DATA, 0},
+		{"BLENDWEIGHT",  0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 52, D3D11_INPUT_PER_VERTEX_DATA, 0},
+	};
+	HR_T(dev->CreateInputLayout(ilBW, _countof(ilBW),
+		vsb2->GetBufferPointer(), vsb2->GetBufferSize(), mIL_PNTT_BW.GetAddressOf()));
+
+	return true;
+}
+
+void TutorialApp::BuildLightCameraAndUpload(ID3D11DeviceContext* ctx,
+	const DirectX::SimpleMath::Vector3& camPos,
+	const DirectX::SimpleMath::Vector3& camForward,
+	const DirectX::SimpleMath::Vector3& lightDir_unit,
+	float focusDist, float lightDist)
+{
+	using namespace DirectX::SimpleMath;
+
+	// 1) 타겟(카메라 앞쪽 일정 거리)
+	Vector3 lookAt = camPos + camForward * focusDist;
+
+	// 2) 라이트 위치 = 타겟 - 라이트방향 * 거리
+	Vector3 lightPos = lookAt - lightDir_unit * lightDist;
+
+	// 3) Light View/Proj (원근 투영)
+	Vector3 up(0, 1, 0);
+	mLightView = XMMatrixLookAtLH(lightPos, lookAt, up);
+	float aspect = (float)mShadowW / (float)mShadowH;
+	mLightProj = XMMatrixPerspectiveFovLH(mShadowFovY, aspect, mShadowNear, mShadowFar);
+
+	// 4) CB(b6) 업로드 (Shared.hlsli: LightViewProj, ShadowParams)
+	struct ShadowCB_ {
+		DirectX::XMFLOAT4X4 LVP;
+		DirectX::XMFLOAT4   Params; // x=bias(미사용), y=1/w, z=1/h, w=0
+	} scb{};
+
+	auto LVP = (mLightView * mLightProj).Transpose();
+	XMStoreFloat4x4(&scb.LVP, LVP);
+	scb.Params = { 0.0f, 1.0f / mShadowW, 1.0f / mShadowH, 0.0f };
+
+	ctx->UpdateSubresource(mCB_Shadow.Get(), 0, nullptr, &scb, 0, 0);
+	ID3D11Buffer* b6 = mCB_Shadow.Get();
+	ctx->VSSetConstantBuffers(6, 1, &b6); // b6: ShadowCB
+	ctx->PSSetConstantBuffers(6, 1, &b6);
+}
+
+void TutorialApp::RenderShadowPass(ID3D11DeviceContext* ctx,
+	const DirectX::SimpleMath::Vector3& camPos,
+	const DirectX::SimpleMath::Vector3& camForward,
+	const DirectX::SimpleMath::Vector3& lightDir_unit,
+	float focusDist, float lightDist)
+{
+	// 0) LightViewProj 계산 + CB(b6) 업로드
+	BuildLightCameraAndUpload(ctx, camPos, camForward, lightDir_unit, focusDist, lightDist);
+
+	// 1) 타깃 설정 (컬러 RTV 없음, DSV만)
+	ctx->OMSetRenderTargets(0, nullptr, mShadowDSV.Get());
+	ctx->ClearDepthStencilView(mShadowDSV.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+	ctx->RSSetViewports(1, &mShadowVP);
+	ctx->RSSetState(mRS_ShadowBias.Get());
+
+	// 2) 공용 상태
+	float blend[4] = { 0,0,0,0 };
+	ctx->OMSetBlendState(nullptr, blend, 0xFFFFFFFF);
+	ID3D11SamplerState* cmp = mSamShadowCmp.Get();
+	ctx->PSSetSamplers(1, 1, &cmp); // s1
+
+	// 3) 장면 오브젝트 렌더 (Rigid / Skinned)
+	//    worldModel / cb0 / useCB / boneCB 등은 네가 이미 쓰던 것을 그대로 전달
+	// 예시:
+	// rigid->DrawDepthOnly(ctx, world, mLightView, mLightProj, cb0, useCB, mVS_Depth.Get(), mPS_Depth.Get(), mIL_PNTT.Get(), mShadowAlphaCut);
+	// skel->DrawDepthOnly (ctx, world, mLightView, mLightProj, cb0, useCB, boneCB, mVS_DepthSkinned.Get(), mPS_Depth.Get(), mIL_PNTT_BW.Get(), mShadowAlphaCut);
+
+	// 4) 상태 원복은 메인 패스 들어가기 전에 네 기존 코드 흐름대로
+}
+
+
 
 
 
@@ -222,9 +378,167 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->UpdateSubresource(m_pBlinnCB, 0, nullptr, &bp, 0, 0);
 	m_pDeviceContext->PSSetConstantBuffers(1, 1, &m_pBlinnCB);
 
+
 	// 공통 값
 	auto* ctx = m_pDeviceContext;
 	Vector4 vLightDir = cb.vLightDir, vLightColor = cb.vLightColor;
+
+// ============================================================================
+// SHADOW (DepthOnly) PASS  —  카메라 정면+거리 지점을 향하는 원근 라이트 카메라
+// ============================================================================
+
+	{
+		// 0) 라이트 카메라 구성 (요구사항: 카메라 앞쪽 focusDist 지점을 라이트가 응시)
+		const Vector3 eyePos = m_Camera.m_World.Translation();
+		const Vector3 camFwd = m_Camera.GetForward(); // Camera.cpp: return -m_World.Forward();
+		Vector3 L = Vector3(vLightDir.x, vLightDir.y, vLightDir.z); // 위에서 만든 라이트 방향
+		L.Normalize();
+
+		const float focusDist = 50.0f;   // 장면에 맞게 가감
+		const float lightDist = 100.0f;  // 장면에 맞게 가감
+
+		const Vector3 lookAt = eyePos + camFwd * focusDist;
+		const Vector3 lightPos = lookAt - L * lightDist;
+
+		const Matrix lightView = Matrix::CreateLookAt(lightPos, lookAt, Vector3::UnitY);
+		const float  aspectSh = float(mShadowW) / float(mShadowH);
+		const Matrix lightProj = Matrix::CreatePerspectiveFieldOfView(mShadowFovY, aspectSh, mShadowNear, mShadowFar);
+		const Matrix lightVP = lightView * lightProj;
+
+		// [라이트 카메라 계산 직후에 추가]
+		mLightView = lightView;          // 멤버에 저장 (다음 단계/디버그용)
+		mLightProj = lightProj;
+
+		// [정적 메시 렌더 아래에 "스키닝 메시"도 Shadow PASS에 포함]
+		if (mSkinRig && mSkinX.enabled)
+		{
+			// 스키닝 depth 전용 셋업
+			ctx->IASetInputLayout(mIL_PNTT_BW.Get());
+			ctx->VSSetShader(mVS_DepthSkinned.Get(), nullptr, 0);
+			ctx->PSSetShader(mPS_Depth.Get(), nullptr, 0);
+
+			mSkinRig->DrawDepthOnly(
+				ctx,
+				ComposeSRT(mSkinX),
+				mLightView, mLightProj,
+				m_pConstantBuffer,      // b0
+				m_pUseCB,               // b2 (alphaCut/opacity clip)
+				m_pBoneCB,              // b4 (본 팔레트)
+				mVS_DepthSkinned.Get(),
+				mPS_Depth.Get(),
+				mIL_PNTT_BW.Get(),
+				mShadowAlphaCut
+			);
+		}
+
+		// 1) ShadowCB(b6) 업로드  (Shared.hlsli: LightViewProj, ShadowParams)
+		struct ShadowCB_ {
+			Matrix LVP;      // transpose 해서 보냄
+			Vector4 Params;  // x: (옵션) depthBias, y: 1/w, z: 1/h, w: 0
+		} scb;
+
+		scb.LVP = XMMatrixTranspose(lightVP);
+		scb.Params = Vector4(0.0f, 1.0f / mShadowW, 1.0f / mShadowH, 0.0f);
+
+		// (멤버 이름이 다르면 맞춰서 변경)
+		ctx->UpdateSubresource(mCB_Shadow.Get(), 0, nullptr, &scb, 0, 0);
+		{ ID3D11Buffer* b6 = mCB_Shadow.Get(); ctx->VSSetConstantBuffers(6, 1, &b6); ctx->PSSetConstantBuffers(6, 1, &b6); }
+
+		// 2) 렌더 타깃: DSV만 설정 (컬러 RTV 없음), 뷰포트는 그림자용
+		//    혹시 t5에 SRV가 물려 있을 수 있으니 미리 해제(습관)
+		{ ID3D11ShaderResourceView* nullSRV[1] = { nullptr }; ctx->PSSetShaderResources(5, 1, nullSRV); }
+
+		ctx->OMSetRenderTargets(0, nullptr, mShadowDSV.Get());
+		ctx->ClearDepthStencilView(mShadowDSV.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+		ctx->RSSetViewports(1, &mShadowVP);
+
+		// (선택) 깊이 바이어스 RS 적용
+		if (mRS_ShadowBias) ctx->RSSetState(mRS_ShadowBias.Get());
+
+		// 3) 깊이 전용 셰이더 바인딩 + CB0(View/Proj)만 라이트 카메라로 일시 교체
+		ConstantBuffer cbDepth = cb;
+		cbDepth.mView = XMMatrixTranspose(lightView);
+		cbDepth.mProjection = XMMatrixTranspose(lightProj);
+		ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cbDepth, 0, 0);
+		ctx->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+
+		ctx->IASetInputLayout(mIL_PNTT.Get()); // Static PNTT
+		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		ctx->VSSetShader(mVS_Depth.Get(), nullptr, 0);
+		ctx->PSSetShader(mPS_Depth.Get(), nullptr, 0);
+
+		// 4) 정적 메시(StaticMesh) 그리기 — Opaque + AlphaCut 나눠서
+		auto DrawDepth_StaticOpaque = [&](StaticMesh& mesh, const std::vector<MaterialGPU>& mtls, const Matrix& world)
+			{
+				ConstantBuffer local = cbDepth;
+				local.mWorld = XMMatrixTranspose(world);
+				local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
+				ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
+
+				for (size_t i = 0; i < mesh.Ranges().size(); ++i) {
+					const auto& r = mesh.Ranges()[i];
+					const auto& mat = mtls[r.materialIndex];
+					if (mat.hasOpacity) continue; // 불투명만
+
+					// PS의 clip() 비활성
+					UseCB use{}; use.useOpacity = 0u; use.alphaCut = -1.0f;
+					ctx->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
+					ctx->PSSetConstantBuffers(2, 1, &m_pUseCB);
+
+					mat.Bind(ctx);
+					mesh.DrawSubmesh(ctx, (UINT)i);
+					MaterialGPU::Unbind(ctx);
+				}
+			};
+
+		auto DrawDepth_StaticCut = [&](StaticMesh& mesh, const std::vector<MaterialGPU>& mtls, const Matrix& world)
+			{
+				ConstantBuffer local = cbDepth;
+				local.mWorld = XMMatrixTranspose(world);
+				local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
+				ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
+
+				for (size_t i = 0; i < mesh.Ranges().size(); ++i) {
+					const auto& r = mesh.Ranges()[i];
+					const auto& mat = mtls[r.materialIndex];
+					if (!mat.hasOpacity) continue; // 컷아웃만
+
+					// PS의 clip() 활성 (alphaCut 기준)
+					UseCB use{}; use.useOpacity = 1u; use.alphaCut = mDbg.alphaCut;
+					ctx->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
+					ctx->PSSetConstantBuffers(2, 1, &m_pUseCB);
+
+					mat.Bind(ctx);
+					mesh.DrawSubmesh(ctx, (UINT)i);
+					MaterialGPU::Unbind(ctx);
+				}
+			};
+
+		// 정적 메시들 투입 (네가 쓰는 것만 남겨도 됨)
+		if (mTreeX.enabled) { auto W = ComposeSRT(mTreeX);  DrawDepth_StaticOpaque(gTree, gTreeMtls, W); DrawDepth_StaticCut(gTree, gTreeMtls, W); }
+		if (mCharX.enabled) { auto W = ComposeSRT(mCharX);  DrawDepth_StaticOpaque(gChar, gCharMtls, W); DrawDepth_StaticCut(gChar, gCharMtls, W); }
+		if (mZeldaX.enabled) { auto W = ComposeSRT(mZeldaX); DrawDepth_StaticOpaque(gZelda, gZeldaMtls, W); DrawDepth_StaticCut(gZelda, gZeldaMtls, W); }
+
+		// TODO(다음 단계): 스키닝 메시(mBoxRig, mSkinRig)도 DepthOnly로 렌더 (전용 VS 사용)
+
+		// 5) 메인 렌더 타깃/뷰포트 복구
+		{
+			ID3D11RenderTargetView* rtv = m_pRenderTargetView;
+			ctx->OMSetRenderTargets(1, &rtv, m_pDepthStencilView);
+
+			D3D11_VIEWPORT vp{};
+			vp.TopLeftX = 0; vp.TopLeftY = 0;
+			vp.Width = (float)m_ClientWidth; vp.Height = (float)m_ClientHeight;
+			vp.MinDepth = 0.0f; vp.MaxDepth = 1.0f;
+			ctx->RSSetViewports(1, &vp);
+		}
+	}
+
+	// [Shadow PASS 블록 "메인 RT/뷰포트 복구" 바로 뒤에 추가]
+	ctx->RSSetState(nullptr);        // 바이어스 RS 해제(원복). 
+	// 또는 네 기본 RS(m_pCullBackRS)로 명시 복원해도 OK.
+	// ==================== SHADOW PASS END ====================
+
 
 	// ===== 람다: OPAQUE ONLY (트렁크 등 불투명만) =====
 	auto DrawOpaqueOnly = [&](StaticMesh& mesh,
@@ -410,6 +724,24 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->PSSetShader(m_pMeshPS, nullptr, 0);
 	if (m_pSamplerLinear) m_pDeviceContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
 
+	// ===== (SHADOW) 본 패스용 바인딩: PS b6 / t5 / s1 =====
+	{
+		struct ShadowCB_ { Matrix LVP; Vector4 Params; } scb;
+		scb.LVP = XMMatrixTranspose(mLightView * mLightProj);     // Shadow PASS에서 만든 멤버 사용
+		scb.Params = Vector4(mShadowCmpBias, 1.0f / mShadowW, 1.0f / mShadowH, 0.0f);
+
+		m_pDeviceContext->UpdateSubresource(mCB_Shadow.Get(), 0, nullptr, &scb, 0, 0);
+
+		ID3D11Buffer* b6 = mCB_Shadow.Get();
+		m_pDeviceContext->PSSetConstantBuffers(6, 1, &b6);           // b6
+
+		ID3D11ShaderResourceView* s = mShadowSRV.Get();
+		m_pDeviceContext->PSSetShaderResources(5, 1, &s);            // t5
+
+		ID3D11SamplerState* cmp = mSamShadowCmp.Get();
+		m_pDeviceContext->PSSetSamplers(1, 1, &cmp);                 // s1
+	}
+
 
 
 	// ===== B) OPAQUE =====
@@ -452,6 +784,7 @@ void TutorialApp::OnRender()
 					eye, m_Ka, m_Ks, m_Shininess, m_Ia,
 					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
 				);
+
 				BindStatic();
 			}
 		}
@@ -513,6 +846,7 @@ void TutorialApp::OnRender()
 					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
 				);
 				BindStatic();
+				
 			}
 		}
 	}
@@ -564,6 +898,7 @@ void TutorialApp::OnRender()
 					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
 				);
 				BindStatic();
+
 			}
 
 			m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
@@ -660,6 +995,9 @@ void TutorialApp::OnRender()
 
 bool TutorialApp::InitScene()
 {
+	CreateShadowResources(m_pDevice);
+	CreateDepthOnlyShaders(m_pDevice);
+
 	// 1) PNTT 셰이더/IL =================================================================
 	{
 		ID3D10Blob* vsb = nullptr;
@@ -1069,7 +1407,6 @@ bool TutorialApp::InitScene()
 		rt.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 		HR_T(m_pDevice->CreateBlendState(&bd, &m_pBS_Alpha));
 	}
-
 
 	return true;
 }
