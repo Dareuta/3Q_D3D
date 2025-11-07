@@ -101,6 +101,9 @@ public:
 
     // 본 팔레트 계산 후 boneCB에 업로드
     void UpdateBonePalette(ID3D11DeviceContext* ctx, ID3D11Buffer* boneCB, const Matrix& worldModel);
+    // SkinnedSkeletal.h (public:)
+    void WarmupBoneCB(ID3D11DeviceContext* ctx, ID3D11Buffer* boneCB);
+
 
     // 정보
     double DurationSec() const {

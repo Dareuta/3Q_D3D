@@ -149,7 +149,9 @@ private:
 	DirectX::SimpleMath::Matrix mLightProj = DirectX::SimpleMath::Matrix::Identity;
 
 	// 설정값
-	UINT  mShadowW = 2048, mShadowH = 2048, mShadowCmpBias = 0.0015f;
+	UINT  mShadowW = 2048, mShadowH = 2048;
+	float mShadowCmpBias = 0.0015f; // ← float로 분리 선언
+
 	float mShadowFovY = DirectX::XMConvertToRadians(60.0f); // 원근 투영
 	float mShadowNear = 1.0f, mShadowFar = 200.0f;
 	float mShadowDepthBias = 1000.0f;        // RS DepthBias
@@ -178,6 +180,15 @@ private:
 	ID3D11Buffer* m_pArrowIB = nullptr;
 	ID3D11RasterizerState* m_pDbgRS = nullptr;   // CullNone
 	ID3D11Buffer* m_pDbgCB = nullptr;   // PS b3
+
+	// --- Debug Grid ---
+	Microsoft::WRL::ComPtr<ID3D11Buffer>        mGridVB, mGridIB;
+	Microsoft::WRL::ComPtr<ID3D11InputLayout>   mGridIL;
+	Microsoft::WRL::ComPtr<ID3D11VertexShader>  mGridVS;
+	Microsoft::WRL::ComPtr<ID3D11PixelShader>   mGridPS;
+	UINT mGridIndexCount = 0;
+	float mGridHalfSize = 200.0f;   // +-200m
+	float mGridY = 0.0f;            // y=0 높이
 
 	// ===== UI/디버그 데이터 =====
 	struct XformUI {

@@ -351,19 +351,47 @@ void SkinnedSkeletal::EvaluatePose(double tSec, bool loop)
 }
 
 // ===== 본 팔레트 업데이트 =====
-void SkinnedSkeletal::UpdateBonePalette(ID3D11DeviceContext* ctx, ID3D11Buffer* boneCB, const Matrix& /*worldModel*/)
+void SkinnedSkeletal::UpdateBonePalette(
+	ID3D11DeviceContext* ctx,
+	ID3D11Buffer* boneCB,
+	const Matrix& /*worldModel*/)
 {
-	if (mBonePalette.size() != mBones.size()) mBonePalette.resize(mBones.size());
-	for (size_t i = 0;i < mBones.size();++i) {
+	// HLSL 쪽 kMaxBones = 256과 반드시 일치시키자
+	static constexpr size_t kMaxBones = 256;
+
+	// 항상 kMaxBones 개 만큼 업로드할 임시 버퍼 (트랜스포즈 반영)
+	DirectX::XMFLOAT4X4 temp[kMaxBones];
+
+	const size_t n = std::min(mBones.size(), kMaxBones);
+
+	// 1) 실제 본 개수만큼 계산해서 채우기
+	for (size_t i = 0; i < n; ++i) {
 		const auto& b = mBones[i];
-		const Matrix G = mNodes[b.node].poseGlobal; // model space
-		Matrix M = b.offset * G;
-		mBonePalette[i] = XMMatrixTranspose(M);
+		const Matrix G = mNodes[b.node].poseGlobal;   // model space
+		const Matrix M = b.offset * G;                // skinning matrix
+		XMStoreFloat4x4(&temp[i], XMMatrixTranspose(M));
 	}
-	if (!mBonePalette.empty())
-		ctx->UpdateSubresource(boneCB, 0, nullptr, mBonePalette.data(), 0, 0);
+
+	// 2) 남는 슬롯은 Identity로 패딩
+	for (size_t i = n; i < kMaxBones; ++i) {
+		XMStoreFloat4x4(&temp[i], XMMatrixIdentity());
+	}
+
+	// 3) CB 전체 크기만큼 항상 업로드 (크래시 방지 핵심)
+	ctx->UpdateSubresource(boneCB, 0, nullptr, temp, 0, 0);
 	ctx->VSSetConstantBuffers(4, 1, &boneCB); // b4
 }
+
+// SkinnedSkeletal.cpp
+void SkinnedSkeletal::WarmupBoneCB(ID3D11DeviceContext* ctx, ID3D11Buffer* boneCB)
+{
+	// 1) 바인드 포즈로 평가 (클립이 없으면 bindLocal, 있으면 t=0)
+	EvaluatePose(0.0, /*loop=*/true);
+
+	// 2) 팔레트 업로드 (항상 256개 패딩)
+	UpdateBonePalette(ctx, boneCB, Matrix::Identity);
+}
+
 
 // ===== 렌더 헬퍼 (CB 채우기 & UseCB) =====
 struct ConstantBuffer_RS {

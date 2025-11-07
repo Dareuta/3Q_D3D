@@ -383,6 +383,10 @@ void TutorialApp::OnRender()
 	auto* ctx = m_pDeviceContext;
 	Vector4 vLightDir = cb.vLightDir, vLightColor = cb.vLightColor;
 
+	// Shadow PASS 들어가기 직전
+	ID3D11RasterizerState* rsBeforeShadow = nullptr;
+	ctx->RSGetState(&rsBeforeShadow); // AddRef됨
+
 // ============================================================================
 // SHADOW (DepthOnly) PASS  —  카메라 정면+거리 지점을 향하는 원근 라이트 카메라
 // ============================================================================
@@ -453,7 +457,8 @@ void TutorialApp::OnRender()
 		ctx->RSSetViewports(1, &mShadowVP);
 
 		// (선택) 깊이 바이어스 RS 적용
-		if (mRS_ShadowBias) ctx->RSSetState(mRS_ShadowBias.Get());
+		if (mRS_ShadowBias) ctx->RSSetState(mRS_ShadowBias.Get());		
+
 
 		// 3) 깊이 전용 셰이더 바인딩 + CB0(View/Proj)만 라이트 카메라로 일시 교체
 		ConstantBuffer cbDepth = cb;
@@ -534,9 +539,12 @@ void TutorialApp::OnRender()
 		}
 	}
 
-	// [Shadow PASS 블록 "메인 RT/뷰포트 복구" 바로 뒤에 추가]
-	ctx->RSSetState(nullptr);        // 바이어스 RS 해제(원복). 
-	// 또는 네 기본 RS(m_pCullBackRS)로 명시 복원해도 OK.
+	// Shadow PASS 끝난 뒤
+	if (rsBeforeShadow) {
+		ctx->RSSetState(rsBeforeShadow);
+		rsBeforeShadow->Release();
+	}
+
 	// ==================== SHADOW PASS END ====================
 
 
@@ -980,6 +988,44 @@ void TutorialApp::OnRender()
 			SAFE_RELEASE(oldBS); SAFE_RELEASE(oldDSS); SAFE_RELEASE(oldRS);
 		}
 
+		// ===== Debug Grid (opaque, receives shadow) =====
+		{
+			// 상태 설정 (불투명)
+			float bf[4] = { 0,0,0,0 };
+			m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
+			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
+			m_pDeviceContext->RSSetState(m_pCullBackRS); // 위쪽을 보게 CCW로 만들었음
+
+			// CB0: World(=Identity), 나머지는 현재 view/proj 그대로
+			ConstantBuffer local = {};
+			local.mWorld = XMMatrixTranspose(Matrix::Identity);
+			local.mWorldInvTranspose = XMMatrixTranspose(Matrix::Identity);
+			local.mView = XMMatrixTranspose(view);
+			local.mProjection = XMMatrixTranspose(m_Projection);
+			local.vLightDir = cb.vLightDir;
+			local.vLightColor = cb.vLightColor;
+			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
+			m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+			m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+
+			// b1(ambient, kA 등) 이미 바인딩되어 있음 (위에서 m_pBlinnCB)
+
+			UINT stride = sizeof(DirectX::XMFLOAT3);
+			UINT offset = 0;
+			m_pDeviceContext->IASetInputLayout(mGridIL.Get());
+			m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			m_pDeviceContext->IASetVertexBuffers(0, 1, mGridVB.GetAddressOf(), &stride, &offset);
+			m_pDeviceContext->IASetIndexBuffer(mGridIB.Get(), DXGI_FORMAT_R16_UINT, 0);
+			m_pDeviceContext->VSSetShader(mGridVS.Get(), nullptr, 0);
+			m_pDeviceContext->PSSetShader(mGridPS.Get(), nullptr, 0);
+
+			// 섀도우 사용: 이미 위에서 PS b6/t5/s1 바인딩되어 있어야 함
+			m_pDeviceContext->DrawIndexed(mGridIndexCount, 0, 0);
+
+			// 필요시 메쉬 셰이더로 복구 (아래에 다시 BindStatic 있으니 생략 가능)
+		}
+
+
 
 
 #ifdef _DEBUG
@@ -1260,6 +1306,10 @@ bool TutorialApp::InitScene()
 				L"../Resource/Skinning/"                    // 텍스처 루트
 			);
 		}
+
+		if (mSkinRig && m_pBoneCB) {
+			mSkinRig->WarmupBoneCB(m_pDeviceContext, m_pBoneCB);
+		}
 	}
 	// === Rasterizer states ===
 	{
@@ -1407,6 +1457,45 @@ bool TutorialApp::InitScene()
 		rt.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 		HR_T(m_pDevice->CreateBlendState(&bd, &m_pBS_Alpha));
 	}
+
+	// ==== 2-1) VB/IB: XZ 평면 두 삼각형 (CCW, 위를 바라보게) ====
+	{
+		struct V { DirectX::XMFLOAT3 pos; };
+		float S = mGridHalfSize;
+		float Y = mGridY;
+		V v[4] = {
+			{ {-S, Y, -S} },
+			{ { S, Y, -S} },
+			{ { S, Y,  S} },
+			{ {-S, Y,  S} },
+		};
+		uint16_t idx[6] = { 0,1,2, 0,2,3 };
+		mGridIndexCount = 6;
+
+		D3D11_BUFFER_DESC vb = { sizeof(v), D3D11_USAGE_IMMUTABLE, D3D11_BIND_VERTEX_BUFFER, 0, 0, 0 };
+		D3D11_SUBRESOURCE_DATA vsd = { v };
+		HR_T(m_pDevice->CreateBuffer(&vb, &vsd, &mGridVB));
+
+		D3D11_BUFFER_DESC ib = { sizeof(idx), D3D11_USAGE_IMMUTABLE, D3D11_BIND_INDEX_BUFFER, 0, 0, 0 };
+		D3D11_SUBRESOURCE_DATA isd = { idx };
+		HR_T(m_pDevice->CreateBuffer(&ib, &isd, &mGridIB));
+	}
+
+	// ==== 2-2) 셰이더 & IL ====
+	{
+		Microsoft::WRL::ComPtr<ID3DBlob> vsb, psb;
+		HR_T(CompileShaderFromFile(L"Shader/DbgGrid.hlsl", "VS_Main", "vs_5_0", &vsb));
+		HR_T(CompileShaderFromFile(L"Shader/DbgGrid.hlsl", "PS_Main", "ps_5_0", &psb));
+		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &mGridVS));
+		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &mGridPS));
+
+		// 입력: POSITION(float3)만
+		D3D11_INPUT_ELEMENT_DESC il[] = {
+			{ "POSITION",0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+		};
+		HR_T(m_pDevice->CreateInputLayout(il, 1, vsb->GetBufferPointer(), vsb->GetBufferSize(), &mGridIL));
+	}
+
 
 	return true;
 }

@@ -115,6 +115,38 @@ inline void AlphaClip(float2 uv)
     }
 }
 
+// ==== Shadow sampling (PCF 3x3) ====
+float SampleShadow_PCF(float3 worldPos, float3 Nw)
+{
+    // 월드 → 라이트 clip
+    float4 Lc = mul(float4(worldPos, 1.0f), LightViewProj);
+    float w = max(1e-6, Lc.w);
+    float3 ndc = Lc.xyz / w;
+
+    // 라이트 NDC → UV
+    float2 uv = ndc.xy * 0.5f + 0.5f;
+    if (any(uv < 0.0) || any(uv > 1.0) || ndc.z < 0.0 || ndc.z > 1.0)
+        return 1.0; // 밖이면 그림자 없음
+
+    // 바이어스(법선 기반 보정)
+    float bias = ShadowParams.x;
+    float3 L = normalize(-vLightDir.xyz);
+    bias *= (1.0 - 0.5 * saturate(dot(Nw, L)));
+
+    // 3x3 PCF
+    float2 duv = ShadowParams.yz; // (1/texW, 1/texH)
+    float s = 0.0;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    [unroll]
+        for (int x = -1; x <= 1; ++x)
+        {
+            float2 o = float2(x, y) * duv;
+            s += txShadow.SampleCmpLevelZero(samShadow, uv + o, ndc.z - bias);
+        }
+    return s / 9.0;
+}
+
 // ===== Bones (b4) — Shared에만 둔다!
 static const uint kMaxBones = 256;
 #if defined(SKINNED)
