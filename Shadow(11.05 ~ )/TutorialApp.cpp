@@ -124,6 +124,7 @@ bool TutorialApp::CreateShadowResources(ID3D11Device* dev)
 	sd.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
 	sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
 	sd.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL; // 일반적 설정
+	//sd.ComparisonFunc = D3D11_COMPARISON_LESS;
 	sd.MinLOD = 0; sd.MaxLOD = D3D11_FLOAT32_MAX;
 	if (FAILED(dev->CreateSamplerState(&sd, mSamShadowCmp.GetAddressOf()))) return false;
 
@@ -192,19 +193,63 @@ void TutorialApp::BuildLightCameraAndUpload(ID3D11DeviceContext* ctx,
 	const DirectX::SimpleMath::Vector3& lightDir_unit,
 	float focusDist, float lightDist)
 {
-	using namespace DirectX::SimpleMath;
+	// === 라이트 카메라 구성 ===
+	using namespace DirectX;
+	const Vector3 eyePos = m_Camera.m_World.Translation();
+	const Vector3 camFwd = m_Camera.GetForward();
 
-	// 1) 타겟(카메라 앞쪽 일정 거리)
-	Vector3 lookAt = camPos + camForward * focusDist;
+	// 1) lookAt 결정
+	Vector3 lookAt;
+	if (mShUI.followCamera) {
+		lookAt = eyePos + camFwd * mShUI.focusDist;
+	}
+	else {
+		lookAt = XMLoadFloat3(&mShUI.manualTarget);
+	}
 
-	// 2) 라이트 위치 = 타겟 - 라이트방향 * 거리
-	Vector3 lightPos = lookAt - lightDir_unit * lightDist;
+	// 2) 라이트 방향 (기존 yaw/pitch → vLightDir)
+	Vector3 Ldir(vLightDir.x, vLightDir.y, vLightDir.z);
+	Ldir.Normalize();
 
-	// 3) Light View/Proj (원근 투영)
-	Vector3 up(0, 1, 0);
-	mLightView = XMMatrixLookAtLH(lightPos, lookAt, up);
-	float aspect = (float)mShadowW / (float)mShadowH;
-	mLightProj = XMMatrixPerspectiveFovLH(mShadowFovY, aspect, mShadowNear, mShadowFar);
+	// 3) lightPos 결정 (directional을 '계산용 위치'로)
+	Vector3 lightPos;
+	if (mShUI.useManualPos) {
+		lightPos = XMLoadFloat3(&mShUI.manualPos);
+	}
+	else {
+		lightPos = lookAt - Ldir * mShUI.lightDist;
+	}
+
+	// 4) View 행렬
+	const Matrix lightView = Matrix::CreateLookAt(lightPos, lookAt, Vector3::UnitY);
+
+	// 5) Proj 행렬
+	float aspectSh = float(mShadowW) / float(mShadowH);
+
+	// “카메라 화면의 focusDist 평면 직사각형”을 라이트 프러스텀이 덮게(자동 커버)
+	if (mShUI.autoCover) {
+		// 카메라 파라미터에서 반높이/반너비
+		const float camFovY = XMConvertToRadians(m_FovDegree);
+		const float halfH = tanf(camFovY * 0.5f) * mShUI.focusDist;
+		const float halfW = halfH * (m_ClientWidth / float(m_ClientHeight));
+		const float r = sqrtf(halfW * halfW + halfH * halfH) * mShUI.coverMargin;
+
+		// lightDist 기준으로 FOV / 클립 자동 산출
+		const float d = mShUI.lightDist;
+		const float nz = max(d - r, 0.01f);
+		const float fz = d + r;
+		mShadowNear = nz;
+		mShadowFar = fz;
+		mShadowFovY = 2.0f * atanf(r / d); // 라이트 FOVY 자동화
+	}
+
+	// 최종 투영
+	const Matrix lightProj = Matrix::CreatePerspectiveFieldOfView(mShadowFovY, aspectSh, mShadowNear, mShadowFar);
+	const Matrix lightVP = lightView * lightProj;
+
+	// (디버그용 보관)
+	mLightView = lightView;
+	mLightProj = lightProj;
 
 	// 4) CB(b6) 업로드 (Shared.hlsli: LightViewProj, ShadowParams)
 	struct ShadowCB_ {
@@ -381,7 +426,8 @@ void TutorialApp::OnRender()
 
 	// 공통 값
 	auto* ctx = m_pDeviceContext;
-	Vector4 vLightDir = cb.vLightDir, vLightColor = cb.vLightColor;
+	vLightDir = cb.vLightDir;
+	vLightColor = cb.vLightColor;
 
 	// Shadow PASS 들어가기 직전
 	ID3D11RasterizerState* rsBeforeShadow = nullptr;
@@ -404,37 +450,17 @@ void TutorialApp::OnRender()
 		const Vector3 lookAt = eyePos + camFwd * focusDist;
 		const Vector3 lightPos = lookAt - L * lightDist;
 
-		const Matrix lightView = Matrix::CreateLookAt(lightPos, lookAt, Vector3::UnitY);
+		const Matrix lightView = XMMatrixLookAtLH(lightPos, lookAt, Vector3::UnitY);
+		
+
 		const float  aspectSh = float(mShadowW) / float(mShadowH);
-		const Matrix lightProj = Matrix::CreatePerspectiveFieldOfView(mShadowFovY, aspectSh, mShadowNear, mShadowFar);
+		const Matrix lightProj = XMMatrixPerspectiveFovLH(mShadowFovY, aspectSh, mShadowNear, mShadowFar);
 		const Matrix lightVP = lightView * lightProj;
 
 		// [라이트 카메라 계산 직후에 추가]
 		mLightView = lightView;          // 멤버에 저장 (다음 단계/디버그용)
 		mLightProj = lightProj;
-
-		// [정적 메시 렌더 아래에 "스키닝 메시"도 Shadow PASS에 포함]
-		if (mSkinRig && mSkinX.enabled)
-		{
-			// 스키닝 depth 전용 셋업
-			ctx->IASetInputLayout(mIL_PNTT_BW.Get());
-			ctx->VSSetShader(mVS_DepthSkinned.Get(), nullptr, 0);
-			ctx->PSSetShader(mPS_Depth.Get(), nullptr, 0);
-
-			mSkinRig->DrawDepthOnly(
-				ctx,
-				ComposeSRT(mSkinX),
-				mLightView, mLightProj,
-				m_pConstantBuffer,      // b0
-				m_pUseCB,               // b2 (alphaCut/opacity clip)
-				m_pBoneCB,              // b4 (본 팔레트)
-				mVS_DepthSkinned.Get(),
-				mPS_Depth.Get(),
-				mIL_PNTT_BW.Get(),
-				mShadowAlphaCut
-			);
-		}
-
+				
 		// 1) ShadowCB(b6) 업로드  (Shared.hlsli: LightViewProj, ShadowParams)
 		struct ShadowCB_ {
 			Matrix LVP;      // transpose 해서 보냄
@@ -477,7 +503,7 @@ void TutorialApp::OnRender()
 			{
 				ConstantBuffer local = cbDepth;
 				local.mWorld = XMMatrixTranspose(world);
-				local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
+				local.mWorldInvTranspose = world.Invert();
 				ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 
 				for (size_t i = 0; i < mesh.Ranges().size(); ++i) {
@@ -500,7 +526,7 @@ void TutorialApp::OnRender()
 			{
 				ConstantBuffer local = cbDepth;
 				local.mWorld = XMMatrixTranspose(world);
-				local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
+				local.mWorldInvTranspose = world.Invert();
 				ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 
 				for (size_t i = 0; i < mesh.Ranges().size(); ++i) {
@@ -518,6 +544,26 @@ void TutorialApp::OnRender()
 					MaterialGPU::Unbind(ctx);
 				}
 			};
+
+		if (mSkinRig && mSkinX.enabled)
+		{
+			ctx->IASetInputLayout(mIL_PNTT_BW.Get());
+			ctx->VSSetShader(mVS_DepthSkinned.Get(), nullptr, 0);
+			ctx->PSSetShader(mPS_Depth.Get(), nullptr, 0);
+
+			mSkinRig->DrawDepthOnly(
+				ctx,
+				ComposeSRT(mSkinX),
+				lightView, lightProj,
+				m_pConstantBuffer,  // b0 (지금 light VP로 교체됨)
+				m_pUseCB,           // b2
+				m_pBoneCB,          // b4
+				mVS_DepthSkinned.Get(),
+				mPS_Depth.Get(),
+				mIL_PNTT_BW.Get(),
+				mShadowAlphaCut
+			);
+		}
 
 		// 정적 메시들 투입 (네가 쓰는 것만 남겨도 됨)
 		if (mTreeX.enabled) { auto W = ComposeSRT(mTreeX);  DrawDepth_StaticOpaque(gTree, gTreeMtls, W); DrawDepth_StaticCut(gTree, gTreeMtls, W); }
@@ -539,11 +585,8 @@ void TutorialApp::OnRender()
 		}
 	}
 
-	// Shadow PASS 끝난 뒤
-	if (rsBeforeShadow) {
-		ctx->RSSetState(rsBeforeShadow);
-		rsBeforeShadow->Release();
-	}
+	ctx->RSSetState(rsBeforeShadow);
+	SAFE_RELEASE(rsBeforeShadow);
 
 	// ==================== SHADOW PASS END ====================
 
@@ -555,7 +598,7 @@ void TutorialApp::OnRender()
 		{
 			ConstantBuffer local = cb;
 			local.mWorld = XMMatrixTranspose(world);
-			local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
+			local.mWorldInvTranspose = world.Invert();
 			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 
 			for (size_t i = 0; i < mesh.Ranges().size(); ++i)
@@ -596,7 +639,7 @@ void TutorialApp::OnRender()
 		{
 			ConstantBuffer local = cb;
 			local.mWorld = XMMatrixTranspose(world);
-			local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
+			local.mWorldInvTranspose = world.Invert();
 			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 
 			for (size_t i = 0; i < mesh.Ranges().size(); ++i)
@@ -636,7 +679,7 @@ void TutorialApp::OnRender()
 
 			ConstantBuffer local = cb;
 			local.mWorld = XMMatrixTranspose(world);
-			local.mWorldInvTranspose = XMMatrixTranspose(world.Invert());
+			local.mWorldInvTranspose = world.Invert();
 			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 
 			for (size_t i = 0; i < mesh.Ranges().size(); ++i)
@@ -702,7 +745,7 @@ void TutorialApp::OnRender()
 		skyCB.mWorld = XMMatrixTranspose(Matrix::Identity);
 		skyCB.mView = XMMatrixTranspose(viewNoTrans);
 		skyCB.mProjection = XMMatrixTranspose(m_Projection);
-		skyCB.mWorldInvTranspose = XMMatrixTranspose(Matrix::Identity);
+		skyCB.mWorldInvTranspose = Matrix::Identity;
 		skyCB.vLightDir = Vector4(0, 0, 0, 0);
 		skyCB.vLightColor = Vector4(0, 0, 0, 0);
 		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &skyCB, 0, 0);
@@ -731,6 +774,21 @@ void TutorialApp::OnRender()
 	m_pDeviceContext->VSSetShader(m_pMeshVS, nullptr, 0);
 	m_pDeviceContext->PSSetShader(m_pMeshPS, nullptr, 0);
 	if (m_pSamplerLinear) m_pDeviceContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
+
+
+	// (1) 그림자 맵 SRV: PS t5
+	ID3D11ShaderResourceView* shSRV = mShadowSRV.Get();
+	ctx->PSSetShaderResources(5, 1, &shSRV);
+
+	// (2) 비교 샘플러: PS s1
+	ID3D11SamplerState* shCmp = mSamShadowCmp.Get();
+	ctx->PSSetSamplers(1, 1, &shCmp);
+
+	// (3) 라이트 VP/파라미터 CB: b6  (안전하게 매 프레임 재바인드)
+	ID3D11Buffer* b6 = mCB_Shadow.Get();
+	ctx->VSSetConstantBuffers(6, 1, &b6); // VS에서 쓸 일 있으면 유지
+	ctx->PSSetConstantBuffers(6, 1, &b6);
+
 
 	// ===== (SHADOW) 본 패스용 바인딩: PS b6 / t5 / s1 =====
 	{
@@ -933,7 +991,7 @@ void TutorialApp::OnRender()
 			// 3) CB0 업데이트 (World만 교체)
 			ConstantBuffer local = cb;
 			local.mWorld = XMMatrixTranspose(worldArrow);
-			local.mWorldInvTranspose = XMMatrixTranspose(worldArrow.Invert());
+			local.mWorldInvTranspose = worldArrow.Invert();
 			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 			m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 
@@ -999,7 +1057,7 @@ void TutorialApp::OnRender()
 			// CB0: World(=Identity), 나머지는 현재 view/proj 그대로
 			ConstantBuffer local = {};
 			local.mWorld = XMMatrixTranspose(Matrix::Identity);
-			local.mWorldInvTranspose = XMMatrixTranspose(Matrix::Identity);
+			local.mWorldInvTranspose = Matrix::Identity;
 			local.mView = XMMatrixTranspose(view);
 			local.mProjection = XMMatrixTranspose(m_Projection);
 			local.vLightDir = cb.vLightDir;
@@ -1469,7 +1527,9 @@ bool TutorialApp::InitScene()
 			{ { S, Y,  S} },
 			{ {-S, Y,  S} },
 		};
-		uint16_t idx[6] = { 0,1,2, 0,2,3 };
+		// winding flip (윗면이 보이도록 뒤집기)
+		const uint16_t idx[] = { 0, 2, 1,  0, 3, 2 };
+
 		mGridIndexCount = 6;
 
 		D3D11_BUFFER_DESC vb = { sizeof(v), D3D11_USAGE_IMMUTABLE, D3D11_BIND_VERTEX_BUFFER, 0, 0, 0 };
@@ -1728,6 +1788,47 @@ void TutorialApp::UpdateImGUI()
 				m_LightIntensity = s_initLightIntensity;
 			}
 		}
+
+		if (ImGui::Begin("Shadow / Light Camera"), ImGuiCond_FirstUseEver) {
+			ImGui::Checkbox("Show ShadowMap", &mShUI.showSRV);
+			if (mShUI.showSRV) {
+				// DX11 백엔드는 SRV를 그대로 ImTextureID로 받는다.
+				ImTextureID id = (ImTextureID)mShadowSRV.Get();
+				if (id) ImGui::Image(id, ImVec2(256, 256), ImVec2(0, 0), ImVec2(1, 1));
+				else    ImGui::TextUnformatted("Shadow SRV is null");
+			}
+
+			ImGui::SeparatorText("Mode");
+			ImGui::Checkbox("Follow Camera Focus", &mShUI.followCamera);
+			ImGui::Checkbox("Use Manual Light Position", &mShUI.useManualPos);
+
+			if (mShUI.useManualPos) {
+				ImGui::DragFloat3("Manual Light Pos", &mShUI.manualPos.x, 0.1f);
+			}
+			if (!mShUI.followCamera) {
+				ImGui::DragFloat3("Manual LookAt", &mShUI.manualTarget.x, 0.1f);
+			}
+
+			ImGui::SeparatorText("Coverage");
+			ImGui::Checkbox("Auto Cover Camera View", &mShUI.autoCover);
+			ImGui::DragFloat("FocusDist", &mShUI.focusDist, 0.1f, 0.1f, 5000.0f);
+			ImGui::DragFloat("LightDist", &mShUI.lightDist, 0.1f, 0.1f, 10000.0f);
+			ImGui::DragFloat("Margin", &mShUI.coverMargin, 0.01f, 1.0f, 2.0f);
+
+			if (!mShUI.autoCover) {
+				// 수동 FOV/클립 (기존 멤버 사용)
+				float deg = DirectX::XMConvertToDegrees(mShadowFovY);
+				if (ImGui::DragFloat("FovY(deg)", &deg, 0.1f, 5.0f, 170.0f)) {
+					mShadowFovY = DirectX::XMConvertToRadians(deg);
+				}
+				ImGui::DragFloat("NearZ", &mShadowNear, 0.01f, 0.01f, mShadowFar - 0.01f);
+				ImGui::DragFloat("FarZ", &mShadowFar, 0.1f, mShadowNear + 0.01f, 100000.0f);
+			}
+
+			ImGui::SeparatorText("Bias");
+			ImGui::DragFloat("CmpBias", &mShadowCmpBias, 0.0001f, 0.0f, 0.02f, "%.5f");
+		}
+		ImGui::End();
 
 		// === Material (Blinn-Phong) ===
 		if (ImGui::CollapsingHeader(u8"Material"))

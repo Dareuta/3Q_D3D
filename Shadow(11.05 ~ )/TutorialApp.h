@@ -154,10 +154,21 @@ private:
 
 	float mShadowFovY = DirectX::XMConvertToRadians(60.0f); // 원근 투영
 	float mShadowNear = 1.0f, mShadowFar = 200.0f;
-	float mShadowDepthBias = 1000.0f;        // RS DepthBias
+	float mShadowDepthBias = 2048.0f;        // RS DepthBias
 	float mShadowSlopeBias = 1.5f;          // RS SlopeScaledDepthBias
-	float mShadowAlphaCut = 0.5f;          // PS에서 clip 임계값
+	float mShadowAlphaCut = 0.0f;          // PS에서 clip 임계값
 
+	struct ShadowUI {
+		bool  showSRV = true;    // ImGui에서 섀도우맵 미리보기
+		bool  followCamera = true;    // 카메라 정면(focusDist) 추적
+		bool  useManualPos = false;   // 라이트 위치를 수동으로 지정
+		bool  autoCover = true;    // 카메라 화면 구역 자동 커버
+		float focusDist = 50.0f;   // 카메라 정면 기준 거리
+		float lightDist = 100.0f;  // lookAt에서 라이트까지 거리
+		float coverMargin = 1.10f;   // 자동 커버 여유율(>1)
+		DirectX::XMFLOAT3 manualPos = { 0, 30, -30 }; // 수동 라이트 위치
+		DirectX::XMFLOAT3 manualTarget = { 0, 0, 0 };    // 수동 라이트 타겟
+	} mShUI;
 
 	// TutorialApp.h
 	struct AnimCtrl {
@@ -187,8 +198,10 @@ private:
 	Microsoft::WRL::ComPtr<ID3D11VertexShader>  mGridVS;
 	Microsoft::WRL::ComPtr<ID3D11PixelShader>   mGridPS;
 	UINT mGridIndexCount = 0;
-	float mGridHalfSize = 200.0f;   // +-200m
-	float mGridY = 0.0f;            // y=0 높이
+	float mGridHalfSize = 500.0f;   // +-200m
+	float mGridY = -200.0f;            // y=0 높이
+
+
 
 	// ===== UI/디버그 데이터 =====
 	struct XformUI {
@@ -259,6 +272,8 @@ private:
 	XformUI		mSkinX;                               
 	DebugToggles mDbg;
 
+	Vector4 vLightDir, vLightColor;
+
 	// 디버그 화살표 위치/스케일
 	Vector3 m_ArrowPos{ 0.0f, -100.0f, 100.0f };
 	Vector3 m_ArrowScale{ 1.0f,  1.0f,   1.0f };
@@ -270,3 +285,4 @@ private:
 	bool  mBox_Loop = true;   // 루프
 	float mBox_Speed = 1.0f;  // 재생 속도 배수(음수면 역재생)
 };
+
