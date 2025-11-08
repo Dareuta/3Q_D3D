@@ -130,7 +130,7 @@ bool TutorialApp::CreateShadowResources(ID3D11Device* dev)
 	// 3) Depth-bias Rasterizer (그림자 패스 전용)
 	D3D11_RASTERIZER_DESC rs{};
 	rs.FillMode = D3D11_FILL_SOLID;
-	rs.CullMode = D3D11_CULL_BACK;      
+	rs.CullMode = D3D11_CULL_BACK;
 	rs.DepthClipEnable = TRUE;
 	rs.DepthBias = (INT)mShadowDepthBias;      // 예: 100~2000 구간에서 튜닝
 	rs.SlopeScaledDepthBias = mShadowSlopeBias; // 예: 1.0~2.0
@@ -187,6 +187,8 @@ void TutorialApp::UpdateLightCameraAndShadowCB(ID3D11DeviceContext* ctx)
 
 		mShadowNear = max(0.01f, d - r);
 		mShadowFar = d + r;
+		//mShadowNear = 0.01f;
+		//mShadowFar = 500.0f;
 		mShadowFovY = 2.0f * atanf(r / max(1e-4f, d));
 	}
 
@@ -364,14 +366,7 @@ void TutorialApp::RenderShadowPass(ID3D11DeviceContext* ctx,
 	ctx->OMSetBlendState(nullptr, blend, 0xFFFFFFFF);
 	ID3D11SamplerState* cmp = mSamShadowCmp.Get();
 	ctx->PSSetSamplers(1, 1, &cmp); // s1
-
-	// 3) 장면 오브젝트 렌더 (Rigid / Skinned)
-	//    worldModel / cb0 / useCB / boneCB 등은 네가 이미 쓰던 것을 그대로 전달
-	// 예시:
-	// rigid->DrawDepthOnly(ctx, world, mLightView, mLightProj, cb0, useCB, mVS_Depth.Get(), mPS_Depth.Get(), mIL_PNTT.Get(), mShadowAlphaCut);
-	// skel->DrawDepthOnly (ctx, world, mLightView, mLightProj, cb0, useCB, boneCB, mVS_DepthSkinned.Get(), mPS_Depth.Get(), mIL_PNTT_BW.Get(), mShadowAlphaCut);
-
-	// 4) 상태 원복은 메인 패스 들어가기 전에 네 기존 코드 흐름대로
+	
 }
 
 //================================================================================================
@@ -384,7 +379,6 @@ void TutorialApp::OnUpdate()
 
 	XMMATRIX mSpin = XMMatrixRotationY(t * spinSpeed);
 
-	// 데모용 큐브 world (그대로 유지)
 	XMMATRIX mScaleA = XMMatrixScaling(cubeScale.x, cubeScale.y, cubeScale.z);
 	XMMATRIX mTranslateA = XMMatrixTranslation(cubeTransformA.x, cubeTransformA.y, cubeTransformA.z);
 	m_World = mScaleA * mSpin * mTranslateA;
@@ -437,9 +431,9 @@ void TutorialApp::OnRender()
 	auto* ctx = m_pDeviceContext;
 
 	// ───────────────────────────────────────────────────────────────
-	// 0) 라이트 카메라/섀도우 CB 업데이트 (여기서만 계산, 전 구간 공유)
+	// 0) 라이트 카메라/섀도우 CB 업데이트 
 	// ───────────────────────────────────────────────────────────────
-	UpdateLightCameraAndShadowCB(ctx); // mLightView, mLightProj, mShadowVP, mCB_Shadow 세팅
+	UpdateLightCameraAndShadowCB(ctx); // mLightView, mLightProj, mShadowVP, mCB_Shadow
 
 	// ───────────────────────────────────────────────────────────────
 	// 1) 기본 파라미터 클램프 + 메인 RT 클리어
@@ -572,6 +566,45 @@ void TutorialApp::OnRender()
 		if (mTreeX.enabled) { Matrix W = ComposeSRT(mTreeX);  DrawDepth_Static(gTree, gTreeMtls, W, false); DrawDepth_Static(gTree, gTreeMtls, W, true); }
 		if (mCharX.enabled) { Matrix W = ComposeSRT(mCharX);  DrawDepth_Static(gChar, gCharMtls, W, false); DrawDepth_Static(gChar, gCharMtls, W, true); }
 		if (mZeldaX.enabled) { Matrix W = ComposeSRT(mZeldaX); DrawDepth_Static(gZelda, gZeldaMtls, W, false); DrawDepth_Static(gZelda, gZeldaMtls, W, true); }
+
+		// +++ 여기에 추가 +++
+		if (mBoxRig && mBoxX.enabled)
+		{
+			// b0: 라이트 뷰/프로젝션으로 업데이트
+			ConstantBuffer cbd = cb;
+			const Matrix W = ComposeSRT(mBoxX);
+			cbd.mWorld = XMMatrixTranspose(W);
+			cbd.mWorldInvTranspose = Matrix::Identity;       // Rigid는 VS에서 필요 없으면 Identity로
+			cbd.mView = XMMatrixTranspose(mLightView);
+			cbd.mProjection = XMMatrixTranspose(mLightProj);
+			ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cbd, 0, 0);
+			ctx->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+
+			// IL/VS/PS를 depth 전용으로
+			ctx->IASetInputLayout(mIL_PNTT.Get());
+			ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			ctx->VSSetShader(mVS_Depth.Get(), nullptr, 0);
+			ctx->PSSetShader(mPS_Depth.Get(), nullptr, 0);
+
+			// 알파 컷아웃 재질 대응(있다면 clip)
+			UseCB use{};
+			use.useOpacity = 1u;                  // Rigid 내부에서 재질 분기한다면 그대로 둬도 OK
+			use.alphaCut = mShadowAlphaCut;     // ImGui에서 쓰는 값
+			ctx->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
+			ctx->PSSetConstantBuffers(2, 1, &m_pUseCB);
+
+			// RigidSkeletal 깊이 드로우 (시그니처는 네 프로젝트에 맞춰)
+			mBoxRig->DrawDepthOnly(
+				ctx, W,
+				mLightView, mLightProj,
+				m_pConstantBuffer,    // b0
+				m_pUseCB,             // b2
+				mVS_Depth.Get(),
+				mPS_Depth.Get(),
+				mIL_PNTT.Get(),
+				mShadowAlphaCut
+			);
+		}
 
 		// 스키닝 깊이
 		if (mSkinRig && mSkinX.enabled)
@@ -861,9 +894,9 @@ void TutorialApp::OnRender()
 					ctx,
 					ComposeSRT(mBoxX),
 					view, m_Projection,
-					m_pConstantBuffer,  
-					m_pUseCB,           
-					mDbg.alphaCut,      
+					m_pConstantBuffer,
+					m_pUseCB,
+					mDbg.alphaCut,
 					cb.vLightDir, cb.vLightColor,
 					eye,
 					m_Ka, m_Ks, m_Shininess, m_Ia,
@@ -1152,10 +1185,10 @@ bool TutorialApp::InitScene()
 	mTreeX.pos = { -100, -150, 100 };  mTreeX.initPos = mTreeX.pos;  mTreeX.scl = { 100,100,100 };
 	mCharX.pos = { 100, -150, 100 };  mCharX.initPos = mCharX.pos;
 	mZeldaX.pos = { 0, -150, 250 };  mZeldaX.initPos = mZeldaX.pos;
-	mBoxX.pos = { -200, -300, 400 };
+	mBoxX.pos = { -200, -150, 400 }; mBoxX.scl = { 0.2f,0.2f,0.2f };
 	mSkinX.pos = { 200, -150, 400 };
 
-	mTreeX.enabled = mCharX.enabled = mZeldaX.enabled = mBoxX.enabled = false;
+	//mTreeX.enabled = mCharX.enabled = mZeldaX.enabled = mBoxX.enabled = false;
 
 	mTreeX.initScl = mTreeX.scl; mCharX.initScl = mCharX.scl; mZeldaX.initScl = mZeldaX.scl;
 	mTreeX.initRotD = mTreeX.rotD; mCharX.initRotD = mCharX.rotD; mZeldaX.initRotD = mZeldaX.rotD;
@@ -1527,9 +1560,13 @@ void TutorialApp::UpdateImGUI()
 			}
 		}
 
-		if (ImGui::Begin("Shadow / Light Camera"), ImGuiTreeNodeFlags_DefaultOpen) {
-			// === Lighting ===
-			if (ImGui::CollapsingHeader(u8"Lighting"), ImGuiCond_FirstUseEver)
+		//---------------------------------------------------
+
+		if (ImGui::Begin("Shadow / Light Camera")) // ← 잘못된 comma-operator 패턴 제거
+		{
+			// ── Lighting ────────────────────────────────────────────────
+			ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
+			if (ImGui::CollapsingHeader(u8"Lighting", ImGuiTreeNodeFlags_DefaultOpen))
 			{
 				ImGui::SliderAngle("Yaw", &m_LightYaw, -180.0f, 180.0f);
 				ImGui::SliderAngle("Pitch", &m_LightPitch, -89.0f, 89.0f);
@@ -1542,51 +1579,66 @@ void TutorialApp::UpdateImGUI()
 					m_LightIntensity = s_initLightIntensity;
 				}
 			}
-			
-			ImGui::Checkbox("Show ShadowMap", &mShUI.showSRV);
-			ImGui::Checkbox("Show ShadowGrid", &mDbg.showGrid);
-			ImGui::Checkbox("use Ortho", &mShUI.useOrtho);
 
-		
+			// ── ShadowMap Preview / Grid ────────────────────────────────
+			ImGui::Checkbox("Show ShadowMap", &mShUI.showSRV);
+			ImGui::Checkbox("Show Grid", &mDbg.showGrid);
 
 			if (mShUI.showSRV) {
-				// DX11 백엔드는 SRV를 그대로 ImTextureID로 받는다.
 				ImTextureID id = (ImTextureID)mShadowSRV.Get();
 				if (id) ImGui::Image(id, ImVec2(256, 256), ImVec2(0, 0), ImVec2(1, 1));
 				else    ImGui::TextUnformatted("Shadow SRV is null");
 			}
 
-			ImGui::SeparatorText("Mode");
-			ImGui::Checkbox("Follow Camera Focus", &mShUI.followCamera);
-			ImGui::Checkbox("Use Manual Light Position", &mShUI.useManualPos);
-
-			if (mShUI.useManualPos) {
-				ImGui::DragFloat3("Manual Light Pos", &mShUI.manualPos.x, 0.1f);
-			}
-			if (!mShUI.followCamera) {
-				ImGui::DragFloat3("Manual LookAt", &mShUI.manualTarget.x, 0.1f);
-			}
-
-			ImGui::SeparatorText("Coverage");
-			ImGui::Checkbox("Auto Cover Camera View", &mShUI.autoCover);
+			// ── Focus / Light (카메라 전방 락) ──────────────────────────
+			ImGui::SeparatorText("Focus & Light (locked to camera)");
 			ImGui::DragFloat("FocusDist", &mShUI.focusDist, 0.1f, 0.1f, 5000.0f);
 			ImGui::DragFloat("LightDist", &mShUI.lightDist, 0.1f, 0.1f, 10000.0f);
 			ImGui::DragFloat("Margin", &mShUI.coverMargin, 0.01f, 1.0f, 2.0f);
 
-			if (!mShUI.autoCover) {
-				// 수동 FOV/클립 (기존 멤버 사용)
-				float deg = DirectX::XMConvertToDegrees(mShadowFovY);
-				if (ImGui::DragFloat("FovY(deg)", &deg, 0.1f, 5.0f, 170.0f)) {
-					mShadowFovY = DirectX::XMConvertToRadians(deg);
-				}
-				ImGui::DragFloat("NearZ", &mShadowNear, 0.01f, 0.01f, mShadowFar - 0.01f);
-				ImGui::DragFloat("FarZ", &mShadowFar, 0.1f, mShadowNear + 0.01f, 100000.0f);
-			}
+			// 과제 강제 모드(매 프레임 락)
+			mShUI.followCamera = true;
+			mShUI.useManualPos = false;
+			mShUI.autoCover = true;
+			mShUI.useOrtho = false; // 원근 투영만
 
+			// ── DepthOnly 옵션 ───────────────────────────────────────────
+			ImGui::SeparatorText("DepthOnly");
+			ImGui::SliderFloat("AlphaCut (DepthOnly)", &mShadowAlphaCut, 0.0f, 1.0f, "%.3f");
+
+			// ── Bias(비교/래스터) ───────────────────────────────────────
 			ImGui::SeparatorText("Bias");
 			ImGui::DragFloat("CmpBias", &mShadowCmpBias, 0.0001f, 0.0f, 0.02f, "%.5f");
+			ImGui::DragInt("DepthBias", (int*)&mShadowDepthBias, 1, 0, 200000);
+			ImGui::DragFloat("SlopeScaledBias", &mShadowSlopeBias, 0.01f, 0.0f, 32.0f, "%.2f");
+
+			// ── ShadowMap 해상도 + 재생성 ───────────────────────────────
+			ImGui::SeparatorText("Shadowmap Size");
+			static int resIdx =
+				(mShadowW >= 4096) ? 3 :
+				(mShadowW >= 2048) ? 2 :
+				(mShadowW >= 1024) ? 1 : 0;
+			const char* kResItems[] = { "512", "1024", "2048", "4096" };
+			ImGui::Combo("Resolution", &resIdx, kResItems, IM_ARRAYSIZE(kResItems));
+
+			// 읽기 전용(자동 커버 결과 확인)
+			ImGui::SeparatorText("Derived (read-only)");
+			ImGui::Text("FovY: %.1f deg", DirectX::XMConvertToDegrees(mShadowFovY));
+			ImGui::Text("Near/Far: %.3f / %.3f", mShadowNear, mShadowFar);
+
+			// 적용 버튼: RS(바이어스) + 텍스처(SRV/DSV) 재생성
+			if (ImGui::Button("Apply (recreate shadow map)")) {
+				int sz = 512;
+				if (resIdx == 1) sz = 1024;
+				else if (resIdx == 2) sz = 2048;
+				else if (resIdx == 3) sz = 4096;
+				mShadowW = mShadowH = sz;
+				CreateShadowResources(m_pDevice); // RS(DepthBias/SlopeBias)와 DSV/SRV 갱신
+			}
 		}
 		ImGui::End();
+
+		//---------------------------------------------------
 
 		// === Material (Blinn-Phong) ===
 		if (ImGui::CollapsingHeader(u8"Material"))
@@ -1677,7 +1729,7 @@ void TutorialApp::UpdateImGUI()
 			}
 		}
 
-		if (ImGui::CollapsingHeader(u8"SkinningTest (SkinnedSkeletal)", ImGuiTreeNodeFlags_DefaultOpen))
+		if (ImGui::CollapsingHeader(u8"SkinningTest (SkinnedSkeletal)"))
 		{
 			ImGui::Checkbox("Enabled", &mSkinX.enabled);
 			ImGui::DragFloat3("Position", (float*)&mSkinX.pos, 0.1f, -10000.0f, 10000.0f);
