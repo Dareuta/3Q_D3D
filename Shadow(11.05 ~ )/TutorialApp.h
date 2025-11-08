@@ -171,7 +171,7 @@ private:
 	float mShadowNear = 0.01f, mShadowFar = 1000.0f;
 	int  mShadowDepthBias = 1000;							 // RS DepthBias
 	float mShadowSlopeBias = 1.5f;                            // RS SlopeScaledDepthBias
-	float mShadowAlphaCut = 0.0f;                            // DepthOnly clip 임계
+	float mShadowAlphaCut = 0.4f;                            // DepthOnly clip 임계
 
 	struct ShadowUI {
 		bool  showSRV = true;   // ImGui 프리뷰
@@ -303,7 +303,7 @@ private:
 	Vector4 vLightDir, vLightColor;
 
 	// 디버그 화살표(표시 위치/스케일)
-	Vector3 m_ArrowPos{ 0.0f, -100.0f, 100.0f };
+	Vector3 m_ArrowPos{ 100.0f, 200.0f, 100.0f };
 	Vector3 m_ArrowScale{ 1.0f,    1.0f,  1.0f };
 
 	//============================================================================================

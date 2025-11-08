@@ -367,6 +367,8 @@ void TutorialApp::RenderShadowPass(ID3D11DeviceContext* ctx,
 	ID3D11SamplerState* cmp = mSamShadowCmp.Get();
 	ctx->PSSetSamplers(1, 1, &cmp); // s1
 	
+	ID3D11SamplerState* lin = m_pSamplerLinear;
+	ctx->PSSetSamplers(0, 1, &lin); // s0 (samLinear) - opacity 샘플링용	
 }
 
 //================================================================================================
@@ -509,7 +511,7 @@ void TutorialApp::OnRender()
 	ctx->PSSetConstantBuffers(6, 1, &b6);
 
 	// ───────────────────────────────────────────────────────────────
-	// 3) SHADOW PASS (DepthOnly)  —  LVP 재계산 금지
+	// 3) SHADOW PASS (DepthOnly)  
 	// ───────────────────────────────────────────────────────────────
 	ID3D11RasterizerState* rsBeforeShadow = nullptr;
 	ctx->RSGetState(&rsBeforeShadow); // AddRef
@@ -553,7 +555,7 @@ void TutorialApp::OnRender()
 
 					UseCB use{};
 					use.useOpacity = isCut ? 1u : 0u;
-					use.alphaCut = isCut ? mDbg.alphaCut : -1.0f; // 컷아웃이면 clip() 활성
+					use.alphaCut = isCut ? mShadowAlphaCut : -1.0f; // 컷아웃이면 clip() 활성
 					ctx->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
 					ctx->PSSetConstantBuffers(2, 1, &m_pUseCB);
 
@@ -567,7 +569,6 @@ void TutorialApp::OnRender()
 		if (mCharX.enabled) { Matrix W = ComposeSRT(mCharX);  DrawDepth_Static(gChar, gCharMtls, W, false); DrawDepth_Static(gChar, gCharMtls, W, true); }
 		if (mZeldaX.enabled) { Matrix W = ComposeSRT(mZeldaX); DrawDepth_Static(gZelda, gZeldaMtls, W, false); DrawDepth_Static(gZelda, gZeldaMtls, W, true); }
 
-		// +++ 여기에 추가 +++
 		if (mBoxRig && mBoxX.enabled)
 		{
 			// b0: 라이트 뷰/프로젝션으로 업데이트
@@ -1562,7 +1563,7 @@ void TutorialApp::UpdateImGUI()
 
 		//---------------------------------------------------
 
-		if (ImGui::Begin("Shadow / Light Camera")) // ← 잘못된 comma-operator 패턴 제거
+		if (ImGui::Begin("Shadow / Light Camera")) 
 		{
 			// ── Lighting ────────────────────────────────────────────────
 			ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
