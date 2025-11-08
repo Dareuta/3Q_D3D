@@ -119,11 +119,10 @@ float SampleShadow_PCF(float3 worldPos, float3 Nw)
         return 1.0f; // 라이트 뒤쪽 → 그림자 X
 
     float3 ndc = lp.xyz / lp.w; // ★ 원근 나눗셈
-    float2 uv = ndc.xy * float2(0.5f, -0.5f) + 0.5f; // ★ Y 뒤집기 포함 매핑
-    float z = ndc.z * 0.5f + 0.5f; // [-1,1] → [0,1]
-
-    // 텍스처 밖은 그림자 없음
-    if (any(uv < 0.0f) || any(uv > 1.0f))
+    float2 uv = ndc.xy * float2(0.5f, -0.5f) + 0.5f; // ★ Y 뒤집기 포함 매핑   
+    float z = ndc.z;
+    
+    if (any(uv < 0.0f) || any(uv > 1.0f) || z < 0.0f || z > 1.0f)
         return 1.0f;
 
     // 기울기 기반 바이어스 (너무 크면 분리, 작으면 애크네)

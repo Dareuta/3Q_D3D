@@ -154,7 +154,7 @@ private:
 	float mShadowCmpBias = 0.0015f; // ← float로 분리 선언
 
 	float mShadowFovY = DirectX::XMConvertToRadians(60.0f); // 원근 투영
-	float mShadowNear = 1.0f, mShadowFar = 200.0f;
+	float mShadowNear = 0.01f, mShadowFar = 1000.0f;
 	float mShadowDepthBias = 1000.0f;        // RS DepthBias
 	float mShadowSlopeBias = 1.5f;          // RS SlopeScaledDepthBias
 	float mShadowAlphaCut = 0.0f;          // PS에서 clip 임계값
@@ -164,6 +164,9 @@ private:
 		bool  followCamera = true;    // 카메라 정면(focusDist) 추적
 		bool  useManualPos = false;   // 라이트 위치를 수동으로 지정
 		bool  autoCover = true;    // 카메라 화면 구역 자동 커버
+		
+		bool useOrtho = false;
+
 		float focusDist = 50.0f;   // 카메라 정면 기준 거리
 		float lightDist = 100.0f;  // lookAt에서 라이트까지 거리
 		float coverMargin = 1.10f;   // 자동 커버 여유율(>1)
