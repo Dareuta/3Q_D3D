@@ -50,6 +50,7 @@ private:
 	void UninitScene();
 
 
+	void UpdateLightCameraAndShadowCB(ID3D11DeviceContext* ctx);
 	bool CreateShadowResources(ID3D11Device* dev);
 	bool CreateDepthOnlyShaders(ID3D11Device* dev);
 	void BuildLightCameraAndUpload(ID3D11DeviceContext* ctx,
@@ -154,7 +155,7 @@ private:
 
 	float mShadowFovY = DirectX::XMConvertToRadians(60.0f); // 원근 투영
 	float mShadowNear = 1.0f, mShadowFar = 200.0f;
-	float mShadowDepthBias = 2048.0f;        // RS DepthBias
+	float mShadowDepthBias = 1000.0f;        // RS DepthBias
 	float mShadowSlopeBias = 1.5f;          // RS SlopeScaledDepthBias
 	float mShadowAlphaCut = 0.0f;          // PS에서 clip 임계값
 
@@ -227,6 +228,8 @@ private:
 		bool disableSpecular = false;
 		bool disableEmissive = false;
 		bool forceAlphaClip = true;
+		
+		bool showGrid = false;
 		float alphaCut = 0.4f;
 	};
 

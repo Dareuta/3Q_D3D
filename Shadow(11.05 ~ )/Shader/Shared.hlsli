@@ -74,17 +74,14 @@ struct PS_INPUT
     float3 NormalW : TEXCOORD3;
 };
 
-// ===== Shadow Map (PS: t5/s1, CB: b6) =====
-Texture2D<float> txShadow : register(t5);
-
-// 깊이 비교 전용 샘플러(하드웨어 PCF 사용 가능)
-SamplerComparisonState samShadow : register(s1);
-
 cbuffer ShadowCB : register(b6)
 {
-    float4x4 LightViewProj; // 라이트 뷰-프로젝션 (C++에서 Transpose 해서 넣기)
-    float4 ShadowParams; // x: depthBias, y: 1/texW, z: 1/texH, w: 예약
+    float4x4 gLightViewProj;
+    float4 gShadowParams; // x=CmpBias, y=1/ShadowW, z=1/ShadowH, w=unused
 }
+
+Texture2D<float> txShadow : register(t5);
+SamplerComparisonState samShadow : register(s1);
 
 // ===== Helpers
 inline float3 OrthonormalizeTangent(float3 N, float3 T)
@@ -115,38 +112,36 @@ inline void AlphaClip(float2 uv)
     }
 }
 
-// ==== Shadow sampling (PCF 3x3) ====
 float SampleShadow_PCF(float3 worldPos, float3 Nw)
 {
-    // 월드 → 라이트 clip
-    float4 Lc = mul(float4(worldPos, 1.0f), LightViewProj);
-    float w = max(1e-6, Lc.w);
-    float3 ndc = Lc.xyz / w;
+    float4 lp = mul(float4(worldPos, 1.0f), gLightViewProj);
+    if (lp.w <= 0.0f)
+        return 1.0f; // 라이트 뒤쪽 → 그림자 X
 
-    // 라이트 NDC → UV
-    float2 uv = ndc.xy * 0.5f + 0.5f;
-    if (any(uv < 0.0) || any(uv > 1.0) || ndc.z < 0.0 || ndc.z > 1.0)
-        return 1.0; // 밖이면 그림자 없음
+    float3 ndc = lp.xyz / lp.w; // ★ 원근 나눗셈
+    float2 uv = ndc.xy * float2(0.5f, -0.5f) + 0.5f; // ★ Y 뒤집기 포함 매핑
+    float z = ndc.z * 0.5f + 0.5f; // [-1,1] → [0,1]
 
-    // 바이어스(법선 기반 보정)
-    float bias = ShadowParams.x;
-    float3 L = normalize(-vLightDir.xyz);
-    bias *= (1.0 - 0.5 * saturate(dot(Nw, L)));
+    // 텍스처 밖은 그림자 없음
+    if (any(uv < 0.0f) || any(uv > 1.0f))
+        return 1.0f;
+
+    // 기울기 기반 바이어스 (너무 크면 분리, 작으면 애크네)
+    float ndotl = saturate(dot(Nw, normalize(-vLightDir.xyz)));
+    float bias = max(0.0005f, gShadowParams.x * (1.0f - ndotl));
 
     // 3x3 PCF
-    float2 duv = ShadowParams.yz; // (1/texW, 1/texH)
-    float s = 0.0;
+    float2 texel = gShadowParams.yz;
+    float acc = 0.0f;
     [unroll]
-    for (int y = -1; y <= 1; ++y)
+    for (int dy = -1; dy <= 1; ++dy)
     [unroll]
-        for (int x = -1; x <= 1; ++x)
+        for (int dx = -1; dx <= 1; ++dx)
         {
-            float2 o = float2(x, y) * duv;
-            s += txShadow.SampleCmpLevelZero(samShadow, uv + o, ndc.z - bias);
+            acc += txShadow.SampleCmpLevelZero(samShadow, uv + float2(dx, dy) * texel, z - bias);
         }
-    return s / 9.0;
+    return acc / 9.0f;
 }
-
 // ===== Bones (b4) — Shared에만 둔다!
 static const uint kMaxBones = 256;
 #if defined(SKINNED)

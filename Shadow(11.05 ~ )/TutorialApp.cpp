@@ -131,7 +131,7 @@ bool TutorialApp::CreateShadowResources(ID3D11Device* dev)
 	// 3) 깊이 바이어스용 RS
 	D3D11_RASTERIZER_DESC rs{};
 	rs.FillMode = D3D11_FILL_SOLID;
-	rs.CullMode = D3D11_CULL_BACK;
+	rs.CullMode = D3D11_CULL_FRONT;
 	rs.DepthClipEnable = TRUE;
 	rs.DepthBias = (INT)mShadowDepthBias;     // 1000 정도 스타트
 	rs.SlopeScaledDepthBias = mShadowSlopeBias;
@@ -148,6 +148,71 @@ bool TutorialApp::CreateShadowResources(ID3D11Device* dev)
 	cbd.ByteWidth = sizeof(DirectX::XMFLOAT4X4) + sizeof(DirectX::XMFLOAT4); // LightViewProj + ShadowParams
 	return SUCCEEDED(dev->CreateBuffer(&cbd, nullptr, mCB_Shadow.GetAddressOf()));
 }
+
+// TutorialApp.cpp
+void TutorialApp::UpdateLightCameraAndShadowCB(ID3D11DeviceContext* ctx)
+{
+	using namespace DirectX::SimpleMath;
+
+	// 1) 카메라 기준 타겟/라이트 위치
+	const Vector3 camPos = m_Camera.m_World.Translation();
+	const Vector3 camDir = m_Camera.GetForward(); // 이미 정규화
+
+	const Vector3 lookAt = mShUI.followCamera
+		? (camPos + camDir * mShUI.focusDist)
+		: mShUI.manualTarget;
+
+	// Yaw/Pitch는 UI에서 주는 값 사용. (CreateFromYawPitchRoll은 Yaw,Pitch,Roll 순서)
+	Vector3 Ldir = Vector3::TransformNormal(Vector3::UnitZ,
+		Matrix::CreateFromYawPitchRoll(m_LightYaw, m_LightPitch, 0.0f));
+	Ldir.Normalize();
+
+	const Vector3 lightPos = mShUI.useManualPos
+		? mShUI.manualPos
+		: (lookAt - Ldir * mShUI.lightDist);
+
+	// 거의 수직일 때 up 특이점 회피
+	const Vector3 up = (fabsf(Ldir.y) > 0.97f) ? Vector3::UnitZ : Vector3::UnitY;
+
+	// 2) 자동 커버: 카메라 뷰 원뿔을 라이트 원근 프러스텀으로 감싸기
+	if (mShUI.autoCover)
+	{
+		const float fovY = XMConvertToRadians(m_FovDegree);
+		const float aspect = float(m_ClientWidth) / float(m_ClientHeight);
+
+		const float halfH = tanf(0.5f * fovY) * mShUI.focusDist;
+		const float halfW = halfH * aspect;
+		const float r = sqrtf(halfW * halfW + halfH * halfH) * mShUI.coverMargin;
+		const float d = mShUI.lightDist;
+
+		mShadowNear = max(0.01f, d - r);
+		mShadowFar = d + r;
+		mShadowFovY = 2.0f * atanf(r / max(1e-4f, d));
+	}
+
+	const float aspectSh = float(mShadowW) / float(mShadowH);
+	const Matrix lightView = Matrix::CreateLookAt(lightPos, lookAt, up);
+	const Matrix lightProj = Matrix::CreatePerspectiveFieldOfView(mShadowFovY, aspectSh, mShadowNear, mShadowFar);
+
+	// 저장(디버그/본 패스용)
+	mLightView = lightView;
+	mLightProj = lightProj;
+
+	// 3) b6 업로드 (VS/PS에서 mul(posW, LVP)로 쓰므로 Transpose해서 보냄)
+	struct ShadowCB_ {
+		Matrix LVP;      // LightView * LightProj
+		Vector4 Params;  // x: compareBias, y: 1/w, z: 1/h, w: unused
+	} scb;
+
+	scb.LVP = XMMatrixTranspose(lightView * lightProj);
+	scb.Params = Vector4(mShadowCmpBias, 1.0f / mShadowW, 1.0f / mShadowH, 0.0f);
+
+	ctx->UpdateSubresource(mCB_Shadow.Get(), 0, nullptr, &scb, 0, 0);
+	ID3D11Buffer* b6 = mCB_Shadow.Get();
+	ctx->VSSetConstantBuffers(6, 1, &b6);
+	ctx->PSSetConstantBuffers(6, 1, &b6);
+}
+
 
 bool TutorialApp::CreateDepthOnlyShaders(ID3D11Device* dev)
 {
@@ -361,202 +426,167 @@ void TutorialApp::OnUpdate()
 
 void TutorialApp::OnRender()
 {
-	// ===== 기본 프로젝션/클리어 =====
-	if (m_FovDegree < 10.0f)      m_FovDegree = 10.0f;
+	auto* ctx = m_pDeviceContext;
+
+	// ───────────────────────────────────────────────────────────────
+	// 0) 라이트 카메라/섀도우 CB 업데이트 (여기서만 계산, 전 구간 공유)
+	// ───────────────────────────────────────────────────────────────
+	UpdateLightCameraAndShadowCB(ctx); // mLightView, mLightProj, mShadowVP, mCB_Shadow 세팅
+
+	// ───────────────────────────────────────────────────────────────
+	// 1) 기본 파라미터 클램프 + 메인 RT 클리어
+	// ───────────────────────────────────────────────────────────────
+	if (m_FovDegree < 10.0f)       m_FovDegree = 10.0f;
 	else if (m_FovDegree > 120.0f) m_FovDegree = 120.0f;
-	if (m_Near < 0.0001f) m_Near = 0.0001f;
+	if (m_Near < 0.0001f)          m_Near = 0.0001f;
 	float minFar = m_Near + 0.001f;
-	if (m_Far < minFar) m_Far = minFar;
+	if (m_Far < minFar)            m_Far = minFar;
 
-	float aspect = m_ClientWidth / (float)m_ClientHeight;
-
-	// RS 선택: wire > cullNone > backCull
-	if (mDbg.wireframe && m_pWireRS) {
-		m_pDeviceContext->RSSetState(m_pWireRS);
-	}
-	else if (mDbg.cullNone && m_pDbgRS) {
-		m_pDeviceContext->RSSetState(m_pDbgRS);
-	}
-	else {
-		m_pDeviceContext->RSSetState(m_pCullBackRS);
-	}
-
-	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
-	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
-
+	const float aspect = m_ClientWidth / (float)m_ClientHeight;
 	m_Projection = XMMatrixPerspectiveFovLH(XMConvertToRadians(m_FovDegree), aspect, m_Near, m_Far);
 
-	// ===== 파이프라인 셋업(메쉬 셰이더) =====
-	m_pDeviceContext->IASetInputLayout(m_pMeshIL);
-	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	m_pDeviceContext->VSSetShader(m_pMeshVS, nullptr, 0);
-	m_pDeviceContext->PSSetShader(m_pMeshPS, nullptr, 0);
-	if (m_pSamplerLinear) m_pDeviceContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
+	// RS 선택
+	if (mDbg.wireframe && m_pWireRS)         ctx->RSSetState(m_pWireRS);
+	else if (mDbg.cullNone && m_pDbgRS)      ctx->RSSetState(m_pDbgRS);
+	else                                     ctx->RSSetState(m_pCullBackRS);
 
-	// ===== 공통 CB0(뷰/프로젝션/라이트) + b1(카메라/재질) =====
+	const float clearColor[4] = { color[0], color[1], color[2], color[3] };
+	ctx->ClearRenderTargetView(m_pRenderTargetView, clearColor);
+	ctx->ClearDepthStencilView(m_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+
+	// ───────────────────────────────────────────────────────────────
+	// 2) 공통 CB0(b0) / Blinn(b1) 업로드 (메인 카메라 기준)
+	// ───────────────────────────────────────────────────────────────
 	Matrix view; m_Camera.GetViewMatrix(view);
 	Matrix viewNoTrans = view; viewNoTrans._41 = viewNoTrans._42 = viewNoTrans._43 = 0.0f;
 
 	ConstantBuffer cb{};
-	cb.mView = XMMatrixTranspose(view);
-	cb.mProjection = XMMatrixTranspose(m_Projection);
 	cb.mWorld = XMMatrixTranspose(Matrix::Identity);
 	cb.mWorldInvTranspose = XMMatrixInverse(nullptr, Matrix::Identity);
+	cb.mView = XMMatrixTranspose(view);
+	cb.mProjection = XMMatrixTranspose(m_Projection);
 
+	// 디렉셔널 라이트(dir from yaw/pitch)
 	XMMATRIX R = XMMatrixRotationRollPitchYaw(m_LightPitch, m_LightYaw, 0.0f);
-	XMVECTOR base = XMVector3Normalize(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f));
+	XMVECTOR base = XMVector3Normalize(XMVectorSet(0, 0, 1, 0));
 	XMVECTOR L = XMVector3Normalize(XMVector3TransformNormal(base, R));
-	Vector3 dir = { XMVectorGetX(L), XMVectorGetY(L), XMVectorGetZ(L) };
-	cb.vLightDir = Vector4(dir.x, dir.y, dir.z, 0.0f);
-	cb.vLightColor = Vector4(m_LightColor.x * m_LightIntensity, m_LightColor.y * m_LightIntensity, m_LightColor.z * m_LightIntensity, 1.0f);
+	Vector3  dirV = { XMVectorGetX(L), XMVectorGetY(L), XMVectorGetZ(L) };
+	cb.vLightDir = Vector4(dirV.x, dirV.y, dirV.z, 0.0f);
+	cb.vLightColor = Vector4(m_LightColor.x * m_LightIntensity,
+		m_LightColor.y * m_LightIntensity,
+		m_LightColor.z * m_LightIntensity, 1.0f);
 
-	m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
-	m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
-	m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+	ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+	ctx->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+	ctx->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 
+	// b1
 	BlinnPhongCB bp{};
 	const Vector3 eye = m_Camera.m_World.Translation();
-	bp.EyePosW = Vector4(eye.x, eye.y, eye.z, 1.0f);
-	bp.kA = Vector4(m_Ka.x, m_Ka.y, m_Ka.z, 0.0f);
-	bp.kSAlpha = Vector4(m_Ks, m_Shininess, 0.0f, 0.0f);
-	bp.I_ambient = Vector4(m_Ia.x, m_Ia.y, m_Ia.z, 0.0f);
-	m_pDeviceContext->UpdateSubresource(m_pBlinnCB, 0, nullptr, &bp, 0, 0);
-	m_pDeviceContext->PSSetConstantBuffers(1, 1, &m_pBlinnCB);
+	bp.EyePosW = Vector4(eye.x, eye.y, eye.z, 1);
+	bp.kA = Vector4(m_Ka.x, m_Ka.y, m_Ka.z, 0);
+	bp.kSAlpha = Vector4(m_Ks, m_Shininess, 0, 0);
+	bp.I_ambient = Vector4(m_Ia.x, m_Ia.y, m_Ia.z, 0);
+	ctx->UpdateSubresource(m_pBlinnCB, 0, nullptr, &bp, 0, 0);
+	ctx->PSSetConstantBuffers(1, 1, &m_pBlinnCB);
 
+	// 공통 셰이더(정적 메쉬) 기본 바인드
+	ctx->IASetInputLayout(m_pMeshIL);
+	ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	ctx->VSSetShader(m_pMeshVS, nullptr, 0);
+	ctx->PSSetShader(m_pMeshPS, nullptr, 0);
+	if (m_pSamplerLinear) ctx->PSSetSamplers(0, 1, &m_pSamplerLinear);
 
-	// 공통 값
-	auto* ctx = m_pDeviceContext;
-	vLightDir = cb.vLightDir;
-	vLightColor = cb.vLightColor;
+	// 섀도우용 파라미터(한 번만)
+	struct ShadowCB_ { Matrix LVP; Vector4 Params; } scb;
+	scb.LVP = XMMatrixTranspose(mLightView * mLightProj);
+	scb.Params = Vector4(mShadowCmpBias, 1.0f / mShadowW, 1.0f / mShadowH, 0.0f);
+	ctx->UpdateSubresource(mCB_Shadow.Get(), 0, nullptr, &scb, 0, 0);
+	ID3D11Buffer* b6 = mCB_Shadow.Get();
+	ctx->VSSetConstantBuffers(6, 1, &b6);
+	ctx->PSSetConstantBuffers(6, 1, &b6);
 
-	// Shadow PASS 들어가기 직전
+	// ───────────────────────────────────────────────────────────────
+	// 3) SHADOW PASS (DepthOnly)  —  LVP 재계산 금지
+	// ───────────────────────────────────────────────────────────────
 	ID3D11RasterizerState* rsBeforeShadow = nullptr;
-	ctx->RSGetState(&rsBeforeShadow); // AddRef됨
-
-// ============================================================================
-// SHADOW (DepthOnly) PASS  —  카메라 정면+거리 지점을 향하는 원근 라이트 카메라
-// ============================================================================
+	ctx->RSGetState(&rsBeforeShadow); // AddRef
 
 	{
-		// 0) 라이트 카메라 구성 (요구사항: 카메라 앞쪽 focusDist 지점을 라이트가 응시)
-		const Vector3 eyePos = m_Camera.m_World.Translation();
-		const Vector3 camFwd = m_Camera.GetForward(); // Camera.cpp: return -m_World.Forward();
-		Vector3 L = Vector3(vLightDir.x, vLightDir.y, vLightDir.z); // 위에서 만든 라이트 방향
-		L.Normalize();
-
-		const float focusDist = 50.0f;   // 장면에 맞게 가감
-		const float lightDist = 100.0f;  // 장면에 맞게 가감
-
-		const Vector3 lookAt = eyePos + camFwd * focusDist;
-		const Vector3 lightPos = lookAt - L * lightDist;
-
-		const Matrix lightView = XMMatrixLookAtLH(lightPos, lookAt, Vector3::UnitY);
-		
-
-		const float  aspectSh = float(mShadowW) / float(mShadowH);
-		const Matrix lightProj = XMMatrixPerspectiveFovLH(mShadowFovY, aspectSh, mShadowNear, mShadowFar);
-		const Matrix lightVP = lightView * lightProj;
-
-		// [라이트 카메라 계산 직후에 추가]
-		mLightView = lightView;          // 멤버에 저장 (다음 단계/디버그용)
-		mLightProj = lightProj;
-				
-		// 1) ShadowCB(b6) 업로드  (Shared.hlsli: LightViewProj, ShadowParams)
-		struct ShadowCB_ {
-			Matrix LVP;      // transpose 해서 보냄
-			Vector4 Params;  // x: (옵션) depthBias, y: 1/w, z: 1/h, w: 0
-		} scb;
-
-		scb.LVP = XMMatrixTranspose(lightVP);
-		scb.Params = Vector4(0.0f, 1.0f / mShadowW, 1.0f / mShadowH, 0.0f);
-
-		// (멤버 이름이 다르면 맞춰서 변경)
-		ctx->UpdateSubresource(mCB_Shadow.Get(), 0, nullptr, &scb, 0, 0);
-		{ ID3D11Buffer* b6 = mCB_Shadow.Get(); ctx->VSSetConstantBuffers(6, 1, &b6); ctx->PSSetConstantBuffers(6, 1, &b6); }
-
-		// 2) 렌더 타깃: DSV만 설정 (컬러 RTV 없음), 뷰포트는 그림자용
-		//    혹시 t5에 SRV가 물려 있을 수 있으니 미리 해제(습관)
-		{ ID3D11ShaderResourceView* nullSRV[1] = { nullptr }; ctx->PSSetShaderResources(5, 1, nullSRV); }
-
+		// t5 언바인드, DSV only
+		ID3D11ShaderResourceView* nullSRV[1] = { nullptr };
+		ctx->PSSetShaderResources(5, 1, nullSRV);
 		ctx->OMSetRenderTargets(0, nullptr, mShadowDSV.Get());
 		ctx->ClearDepthStencilView(mShadowDSV.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+
+		// 라이트용 VP/RS
 		ctx->RSSetViewports(1, &mShadowVP);
+		if (mRS_ShadowBias) ctx->RSSetState(mRS_ShadowBias.Get());
 
-		// (선택) 깊이 바이어스 RS 적용
-		if (mRS_ShadowBias) ctx->RSSetState(mRS_ShadowBias.Get());		
-
-
-		// 3) 깊이 전용 셰이더 바인딩 + CB0(View/Proj)만 라이트 카메라로 일시 교체
-		ConstantBuffer cbDepth = cb;
-		cbDepth.mView = XMMatrixTranspose(lightView);
-		cbDepth.mProjection = XMMatrixTranspose(lightProj);
-		ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cbDepth, 0, 0);
-		ctx->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
-
-		ctx->IASetInputLayout(mIL_PNTT.Get()); // Static PNTT
-		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		ctx->VSSetShader(mVS_Depth.Get(), nullptr, 0);
-		ctx->PSSetShader(mPS_Depth.Get(), nullptr, 0);
-
-		// 4) 정적 메시(StaticMesh) 그리기 — Opaque + AlphaCut 나눠서
-		auto DrawDepth_StaticOpaque = [&](StaticMesh& mesh, const std::vector<MaterialGPU>& mtls, const Matrix& world)
+		// Depth 전용 셰이더 바인드
+		// 정적: m_pMeshVS + mPS_Depth / 스키닝: mVS_DepthSkinned + mPS_Depth
+		// (정적 먼저 쓰도록 정리)
+		auto DrawDepth_Static = [&](StaticMesh& mesh, const std::vector<MaterialGPU>& mtls, const Matrix& world, bool alphaCut)
 			{
-				ConstantBuffer local = cbDepth;
-				local.mWorld = XMMatrixTranspose(world);
-				local.mWorldInvTranspose = world.Invert();
-				ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
+				// b0: 라이트 View/Proj 로 교체
+				ConstantBuffer cbd = cb;
+				cbd.mWorld = XMMatrixTranspose(world);
+				cbd.mWorldInvTranspose = world.Invert();
+				cbd.mView = XMMatrixTranspose(mLightView);
+				cbd.mProjection = XMMatrixTranspose(mLightProj);
+				ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cbd, 0, 0);
+				ctx->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+
+				ctx->IASetInputLayout(m_pMeshIL);
+				ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				ctx->VSSetShader(m_pMeshVS, nullptr, 0);    // 깊이 전용 VS를 따로 두지 않는 경우
+				ctx->PSSetShader(mPS_Depth.Get(), nullptr, 0);
 
 				for (size_t i = 0; i < mesh.Ranges().size(); ++i) {
 					const auto& r = mesh.Ranges()[i];
 					const auto& mat = mtls[r.materialIndex];
-					if (mat.hasOpacity) continue; // 불투명만
+					const bool isCut = mat.hasOpacity;
 
-					// PS의 clip() 비활성
-					UseCB use{}; use.useOpacity = 0u; use.alphaCut = -1.0f;
+					if (alphaCut != isCut) continue;
+
+					UseCB use{};
+					use.useOpacity = isCut ? 1u : 0u;
+					use.alphaCut = isCut ? mDbg.alphaCut : -1.0f; // 컷아웃이면 clip() 활성
 					ctx->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
 					ctx->PSSetConstantBuffers(2, 1, &m_pUseCB);
 
-					mat.Bind(ctx);
+					mat.Bind(ctx);            // opacity 텍스처를 PS에서 clip()에 이용
 					mesh.DrawSubmesh(ctx, (UINT)i);
 					MaterialGPU::Unbind(ctx);
 				}
 			};
 
-		auto DrawDepth_StaticCut = [&](StaticMesh& mesh, const std::vector<MaterialGPU>& mtls, const Matrix& world)
-			{
-				ConstantBuffer local = cbDepth;
-				local.mWorld = XMMatrixTranspose(world);
-				local.mWorldInvTranspose = world.Invert();
-				ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
+		if (mTreeX.enabled) { Matrix W = ComposeSRT(mTreeX);  DrawDepth_Static(gTree, gTreeMtls, W, false); DrawDepth_Static(gTree, gTreeMtls, W, true); }
+		if (mCharX.enabled) { Matrix W = ComposeSRT(mCharX);  DrawDepth_Static(gChar, gCharMtls, W, false); DrawDepth_Static(gChar, gCharMtls, W, true); }
+		if (mZeldaX.enabled) { Matrix W = ComposeSRT(mZeldaX); DrawDepth_Static(gZelda, gZeldaMtls, W, false); DrawDepth_Static(gZelda, gZeldaMtls, W, true); }
 
-				for (size_t i = 0; i < mesh.Ranges().size(); ++i) {
-					const auto& r = mesh.Ranges()[i];
-					const auto& mat = mtls[r.materialIndex];
-					if (!mat.hasOpacity) continue; // 컷아웃만
-
-					// PS의 clip() 활성 (alphaCut 기준)
-					UseCB use{}; use.useOpacity = 1u; use.alphaCut = mDbg.alphaCut;
-					ctx->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
-					ctx->PSSetConstantBuffers(2, 1, &m_pUseCB);
-
-					mat.Bind(ctx);
-					mesh.DrawSubmesh(ctx, (UINT)i);
-					MaterialGPU::Unbind(ctx);
-				}
-			};
-
+		// 스키닝 깊이
 		if (mSkinRig && mSkinX.enabled)
 		{
 			ctx->IASetInputLayout(mIL_PNTT_BW.Get());
+			ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			ctx->VSSetShader(mVS_DepthSkinned.Get(), nullptr, 0);
 			ctx->PSSetShader(mPS_Depth.Get(), nullptr, 0);
 
+			// b0를 라이트 VP로 세팅
+			ConstantBuffer cbd = cb;
+			cbd.mWorld = XMMatrixTranspose(ComposeSRT(mSkinX));
+			cbd.mWorldInvTranspose = Matrix::Identity; // 스키닝에서는 VS에서 처리할 수 있음
+			cbd.mView = XMMatrixTranspose(mLightView);
+			cbd.mProjection = XMMatrixTranspose(mLightProj);
+			ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &cbd, 0, 0);
+			ctx->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+
 			mSkinRig->DrawDepthOnly(
-				ctx,
-				ComposeSRT(mSkinX),
-				lightView, lightProj,
-				m_pConstantBuffer,  // b0 (지금 light VP로 교체됨)
-				m_pUseCB,           // b2
+				ctx, ComposeSRT(mSkinX),
+				mLightView, mLightProj,
+				m_pConstantBuffer,  // b0
+				m_pUseCB,           // b2 (alphaCut 제어)
 				m_pBoneCB,          // b4
 				mVS_DepthSkinned.Get(),
 				mPS_Depth.Get(),
@@ -565,159 +595,87 @@ void TutorialApp::OnRender()
 			);
 		}
 
-		// 정적 메시들 투입 (네가 쓰는 것만 남겨도 됨)
-		if (mTreeX.enabled) { auto W = ComposeSRT(mTreeX);  DrawDepth_StaticOpaque(gTree, gTreeMtls, W); DrawDepth_StaticCut(gTree, gTreeMtls, W); }
-		if (mCharX.enabled) { auto W = ComposeSRT(mCharX);  DrawDepth_StaticOpaque(gChar, gCharMtls, W); DrawDepth_StaticCut(gChar, gCharMtls, W); }
-		if (mZeldaX.enabled) { auto W = ComposeSRT(mZeldaX); DrawDepth_StaticOpaque(gZelda, gZeldaMtls, W); DrawDepth_StaticCut(gZelda, gZeldaMtls, W); }
+		// 메인 RT 복구
+		ID3D11RenderTargetView* rtv = m_pRenderTargetView;
+		ctx->OMSetRenderTargets(1, &rtv, m_pDepthStencilView);
 
-		// TODO(다음 단계): 스키닝 메시(mBoxRig, mSkinRig)도 DepthOnly로 렌더 (전용 VS 사용)
-
-		// 5) 메인 렌더 타깃/뷰포트 복구
-		{
-			ID3D11RenderTargetView* rtv = m_pRenderTargetView;
-			ctx->OMSetRenderTargets(1, &rtv, m_pDepthStencilView);
-
-			D3D11_VIEWPORT vp{};
-			vp.TopLeftX = 0; vp.TopLeftY = 0;
-			vp.Width = (float)m_ClientWidth; vp.Height = (float)m_ClientHeight;
-			vp.MinDepth = 0.0f; vp.MaxDepth = 1.0f;
-			ctx->RSSetViewports(1, &vp);
-		}
+		D3D11_VIEWPORT vp{};
+		vp.TopLeftX = 0; vp.TopLeftY = 0;
+		vp.Width = (float)m_ClientWidth; vp.Height = (float)m_ClientHeight;
+		vp.MinDepth = 0.0f; vp.MaxDepth = 1.0f;
+		ctx->RSSetViewports(1, &vp);
 	}
 
 	ctx->RSSetState(rsBeforeShadow);
 	SAFE_RELEASE(rsBeforeShadow);
 
-	// ==================== SHADOW PASS END ====================
+	// ───────────────────────────────────────────────────────────────
+	// 4) SKYBOX (선택)
+	// ───────────────────────────────────────────────────────────────
+	if (mDbg.showSky)
+	{
+		ID3D11RasterizerState* oldRS = nullptr; ctx->RSGetState(&oldRS);
+		ID3D11DepthStencilState* oldDSS = nullptr; UINT oldRef = 0; ctx->OMGetDepthStencilState(&oldDSS, &oldRef);
 
+		ctx->RSSetState(m_pSkyRS);
+		ctx->OMSetDepthStencilState(m_pSkyDSS, 0);
 
-	// ===== 람다: OPAQUE ONLY (트렁크 등 불투명만) =====
-	auto DrawOpaqueOnly = [&](StaticMesh& mesh,
-		const std::vector<MaterialGPU>& mtls,
-		const Matrix& world)
-		{
-			ConstantBuffer local = cb;
-			local.mWorld = XMMatrixTranspose(world);
-			local.mWorldInvTranspose = world.Invert();
-			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
+		ctx->IASetInputLayout(m_pSkyIL);
+		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		ctx->VSSetShader(m_pSkyVS, nullptr, 0);
+		ctx->PSSetShader(m_pSkyPS, nullptr, 0);
 
-			for (size_t i = 0; i < mesh.Ranges().size(); ++i)
-			{
-				const auto& r = mesh.Ranges()[i];
-				const auto& mat = mtls[r.materialIndex];
+		ConstantBuffer skyCB{};
+		skyCB.mWorld = XMMatrixTranspose(Matrix::Identity);
+		skyCB.mView = XMMatrixTranspose(viewNoTrans);
+		skyCB.mProjection = XMMatrixTranspose(m_Projection);
+		skyCB.mWorldInvTranspose = Matrix::Identity;
+		ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &skyCB, 0, 0);
+		ctx->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 
-				// 불투명만 (opacity 텍스처가 있는 잎은 제외)
-				if (mat.hasOpacity) continue;
+		ctx->PSSetShaderResources(0, 1, &m_pSkySRV);
+		ctx->PSSetSamplers(0, 1, &m_pSkySampler);
 
-				mat.Bind(m_pDeviceContext);
+		UINT stride = sizeof(DirectX::XMFLOAT3), offset = 0;
+		ctx->IASetVertexBuffers(0, 1, &m_pSkyVB, &stride, &offset);
+		ctx->IASetIndexBuffer(m_pSkyIB, DXGI_FORMAT_R16_UINT, 0);
+		ctx->DrawIndexed(36, 0, 0);
 
-				UseCB use{};
-				use.useDiffuse = mat.hasDiffuse ? 1u : 0u;
-				use.useNormal = (mat.hasNormal && !mDbg.disableNormal) ? 1u : 0u;
-				use.useSpecular = (!mDbg.disableSpecular) ? (mat.hasSpecular ? 1u : 2u) : 0u;
+		ID3D11ShaderResourceView* null0[1] = { nullptr };
+		ctx->PSSetShaderResources(0, 1, null0);
+		ctx->RSSetState(oldRS);
+		ctx->OMSetDepthStencilState(oldDSS, oldRef);
+		SAFE_RELEASE(oldRS); SAFE_RELEASE(oldDSS);
 
-				use.useEmissive = (mat.hasEmissive && !mDbg.disableEmissive) ? 1u : 0u;
-				use.useOpacity = /* OpaqueOnly */ 0u /* TransparentOnly 에선 1u */;
-				if (mDbg.forceAlphaClip) {
-					use.alphaCut = mDbg.alphaCut;  // 클립 활성
-				}
-				else {
-					use.alphaCut = -1.0f;          // 클립 비활성
-				}
+		// 메쉬 셋업 복구
+		ctx->IASetInputLayout(m_pMeshIL);
+		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		ctx->VSSetShader(m_pMeshVS, nullptr, 0);
+		ctx->PSSetShader(m_pMeshPS, nullptr, 0);
+		if (m_pSamplerLinear) ctx->PSSetSamplers(0, 1, &m_pSamplerLinear);
+	}
 
-				m_pDeviceContext->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
-				m_pDeviceContext->PSSetConstantBuffers(2, 1, &m_pUseCB);
+	// ───────────────────────────────────────────────────────────────
+	// 5) 본 패스에서 섀도우 샘플 바인드 (PS: t5/s1/b6)
+	// ───────────────────────────────────────────────────────────────
+	{
+		// 안전하게 재바인드
+		ctx->UpdateSubresource(mCB_Shadow.Get(), 0, nullptr, &scb, 0, 0);
+		ID3D11Buffer* b6r = mCB_Shadow.Get();
+		ID3D11SamplerState* cmp = mSamShadowCmp.Get();
+		ID3D11ShaderResourceView* shSRV = mShadowSRV.Get();
+		ctx->PSSetConstantBuffers(6, 1, &b6r);
+		ctx->PSSetSamplers(1, 1, &cmp);
+		ctx->PSSetShaderResources(5, 1, &shSRV);
+	}
 
-				mesh.DrawSubmesh(m_pDeviceContext, i);
-				MaterialGPU::Unbind(m_pDeviceContext);
-			}
-		};
-
-	auto DrawAlphaCutOnly = [&](StaticMesh& mesh,
-		const std::vector<MaterialGPU>& mtls,
-		const Matrix& world)
-		{
-			ConstantBuffer local = cb;
-			local.mWorld = XMMatrixTranspose(world);
-			local.mWorldInvTranspose = world.Invert();
-			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
-
-			for (size_t i = 0; i < mesh.Ranges().size(); ++i)
-			{
-				const auto& r = mesh.Ranges()[i];
-				const auto& mat = mtls[r.materialIndex];
-
-				// opacity 맵 있는 서브메시만 컷아웃으로
-				if (!mat.hasOpacity) continue;
-
-				mat.Bind(m_pDeviceContext);
-
-				UseCB use{};
-				use.useDiffuse = mat.hasDiffuse ? 1u : 0u;
-				use.useNormal = (mat.hasNormal && !mDbg.disableNormal) ? 1u : 0u;
-				use.useSpecular = (!mDbg.disableSpecular) ? (mat.hasSpecular ? 1u : 2u) : 0u;
-				use.useEmissive = (mat.hasEmissive && !mDbg.disableEmissive) ? 1u : 0u;
-
-				use.useOpacity = 1u;              // opacity 텍스처 사용
-				use.alphaCut = mDbg.alphaCut;   // 컷 기준 활성화
-
-				m_pDeviceContext->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
-				m_pDeviceContext->PSSetConstantBuffers(2, 1, &m_pUseCB);
-
-				mesh.DrawSubmesh(m_pDeviceContext, i);
-				MaterialGPU::Unbind(m_pDeviceContext);
-			}
-		};
-
-
-	// ===== 람다: TRANSPARENT ONLY (잎 등 반투명만) =====
-	auto DrawTransparentOnly = [&](StaticMesh& mesh,
-		const std::vector<MaterialGPU>& mtls,
-		const Matrix& world)
-		{
-			if (mDbg.forceAlphaClip) return;
-
-			ConstantBuffer local = cb;
-			local.mWorld = XMMatrixTranspose(world);
-			local.mWorldInvTranspose = world.Invert();
-			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
-
-			for (size_t i = 0; i < mesh.Ranges().size(); ++i)
-			{
-				const auto& r = mesh.Ranges()[i];
-				const auto& mat = mtls[r.materialIndex];
-
-				if (!mat.hasOpacity) continue;
-
-				mat.Bind(m_pDeviceContext);
-
-				UseCB use{};
-				use.useDiffuse = mat.hasDiffuse ? 1u : 0u;
-				use.useNormal = (mat.hasNormal && !mDbg.disableNormal) ? 1u : 0u;
-				use.useSpecular = (!mDbg.disableSpecular) ? (mat.hasSpecular ? 1u : 2u) : 0u;
-
-				use.useEmissive = (mat.hasEmissive && !mDbg.disableEmissive) ? 1u : 0u;
-				use.useOpacity = 1u; // 투명
-
-				// 강제 컷아웃 테스트 모드 지원
-				use.alphaCut = mDbg.forceAlphaClip ? mDbg.alphaCut : -1.0f;
-
-
-				m_pDeviceContext->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
-				m_pDeviceContext->PSSetConstantBuffers(2, 1, &m_pUseCB);
-
-				mesh.DrawSubmesh(m_pDeviceContext, i);
-				MaterialGPU::Unbind(m_pDeviceContext);
-			}
-		};
-
+	// 바인더
 	auto BindStatic = [&]() {
 		ctx->IASetInputLayout(m_pMeshIL);
 		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		ctx->VSSetShader(m_pMeshVS, nullptr, 0);
 		ctx->PSSetShader(m_pMeshPS, nullptr, 0);
 		};
-
 	auto BindSkinned = [&]() {
 		ctx->IASetInputLayout(m_pSkinnedIL);
 		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -725,161 +683,164 @@ void TutorialApp::OnRender()
 		ctx->PSSetShader(m_pMeshPS, nullptr, 0);
 		};
 
-	// ===== A) SKYBOX FIRST =====
-	if (mDbg.showSky) {
-		// RS/OM 상태 백업
-		ID3D11RasterizerState* oldRS = nullptr;
-		m_pDeviceContext->RSGetState(&oldRS);
-		ID3D11DepthStencilState* oldDSS = nullptr; UINT oldStencilRef = 0;
-		m_pDeviceContext->OMGetDepthStencilState(&oldDSS, &oldStencilRef);
+	// 드로우 헬퍼
+	auto DrawOpaqueOnly = [&](StaticMesh& mesh, const std::vector<MaterialGPU>& mtls, const Matrix& world)
+		{
+			ConstantBuffer local = cb;
+			local.mWorld = XMMatrixTranspose(world);
+			local.mWorldInvTranspose = world.Invert();
+			ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 
-		m_pDeviceContext->RSSetState(m_pSkyRS);
-		m_pDeviceContext->OMSetDepthStencilState(m_pSkyDSS, 0);
+			for (size_t i = 0; i < mesh.Ranges().size(); ++i) {
+				const auto& r = mesh.Ranges()[i];
+				const auto& mat = mtls[r.materialIndex];
+				if (mat.hasOpacity) continue;
 
-		m_pDeviceContext->IASetInputLayout(m_pSkyIL);
-		m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		m_pDeviceContext->VSSetShader(m_pSkyVS, nullptr, 0);
-		m_pDeviceContext->PSSetShader(m_pSkyPS, nullptr, 0);
+				mat.Bind(ctx);
+				UseCB use{};
+				use.useDiffuse = mat.hasDiffuse ? 1u : 0u;
+				use.useNormal = (mat.hasNormal && !mDbg.disableNormal) ? 1u : 0u;
+				use.useSpecular = (!mDbg.disableSpecular) ? (mat.hasSpecular ? 1u : 2u) : 0u;
+				use.useEmissive = (mat.hasEmissive && !mDbg.disableEmissive) ? 1u : 0u;
+				use.useOpacity = 0u;
+				use.alphaCut = mDbg.forceAlphaClip ? mDbg.alphaCut : -1.0f;
+				ctx->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
+				ctx->PSSetConstantBuffers(2, 1, &m_pUseCB);
 
-		ConstantBuffer skyCB{};
-		skyCB.mWorld = XMMatrixTranspose(Matrix::Identity);
-		skyCB.mView = XMMatrixTranspose(viewNoTrans);
-		skyCB.mProjection = XMMatrixTranspose(m_Projection);
-		skyCB.mWorldInvTranspose = Matrix::Identity;
-		skyCB.vLightDir = Vector4(0, 0, 0, 0);
-		skyCB.vLightColor = Vector4(0, 0, 0, 0);
-		m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &skyCB, 0, 0);
-		m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+				mesh.DrawSubmesh(ctx, (UINT)i);
+				MaterialGPU::Unbind(ctx);
+			}
+		};
+	auto DrawAlphaCutOnly = [&](StaticMesh& mesh, const std::vector<MaterialGPU>& mtls, const Matrix& world)
+		{
+			ConstantBuffer local = cb;
+			local.mWorld = XMMatrixTranspose(world);
+			local.mWorldInvTranspose = world.Invert();
+			ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 
-		m_pDeviceContext->PSSetShaderResources(0, 1, &m_pSkySRV);
-		m_pDeviceContext->PSSetSamplers(0, 1, &m_pSkySampler);
+			for (size_t i = 0; i < mesh.Ranges().size(); ++i) {
+				const auto& r = mesh.Ranges()[i];
+				const auto& mat = mtls[r.materialIndex];
+				if (!mat.hasOpacity) continue;
 
-		UINT stride = sizeof(DirectX::XMFLOAT3);
-		UINT offset = 0;
-		ID3D11Buffer* vbs[] = { m_pSkyVB };
-		m_pDeviceContext->IASetVertexBuffers(0, 1, vbs, &stride, &offset);
-		m_pDeviceContext->IASetIndexBuffer(m_pSkyIB, DXGI_FORMAT_R16_UINT, 0);
-		m_pDeviceContext->DrawIndexed(36, 0, 0);
+				mat.Bind(ctx);
+				UseCB use{};
+				use.useDiffuse = mat.hasDiffuse ? 1u : 0u;
+				use.useNormal = (mat.hasNormal && !mDbg.disableNormal) ? 1u : 0u;
+				use.useSpecular = (!mDbg.disableSpecular) ? (mat.hasSpecular ? 1u : 2u) : 0u;
+				use.useEmissive = (mat.hasEmissive && !mDbg.disableEmissive) ? 1u : 0u;
+				use.useOpacity = 1u;          // alpha-test
+				use.alphaCut = mDbg.alphaCut;
+				ctx->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
+				ctx->PSSetConstantBuffers(2, 1, &m_pUseCB);
 
-		ID3D11ShaderResourceView* nullSRV[1] = { nullptr };
-		m_pDeviceContext->PSSetShaderResources(0, 1, nullSRV);
-		m_pDeviceContext->RSSetState(oldRS);
-		m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldStencilRef);
-		SAFE_RELEASE(oldRS);
-		SAFE_RELEASE(oldDSS);
-	}
-	// 스카이박스 후 메쉬 파이프라인 복구
-	m_pDeviceContext->IASetInputLayout(m_pMeshIL);
-	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	m_pDeviceContext->VSSetShader(m_pMeshVS, nullptr, 0);
-	m_pDeviceContext->PSSetShader(m_pMeshPS, nullptr, 0);
-	if (m_pSamplerLinear) m_pDeviceContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
+				mesh.DrawSubmesh(ctx, (UINT)i);
+				MaterialGPU::Unbind(ctx);
+			}
+		};
+	auto DrawTransparentOnly = [&](StaticMesh& mesh, const std::vector<MaterialGPU>& mtls, const Matrix& world)
+		{
+			if (mDbg.forceAlphaClip) return;
 
+			ConstantBuffer local = cb;
+			local.mWorld = XMMatrixTranspose(world);
+			local.mWorldInvTranspose = world.Invert();
+			ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
 
-	// (1) 그림자 맵 SRV: PS t5
-	ID3D11ShaderResourceView* shSRV = mShadowSRV.Get();
-	ctx->PSSetShaderResources(5, 1, &shSRV);
+			for (size_t i = 0; i < mesh.Ranges().size(); ++i) {
+				const auto& r = mesh.Ranges()[i];
+				const auto& mat = mtls[r.materialIndex];
+				if (!mat.hasOpacity) continue;
 
-	// (2) 비교 샘플러: PS s1
-	ID3D11SamplerState* shCmp = mSamShadowCmp.Get();
-	ctx->PSSetSamplers(1, 1, &shCmp);
+				mat.Bind(ctx);
+				UseCB use{};
+				use.useDiffuse = mat.hasDiffuse ? 1u : 0u;
+				use.useNormal = (mat.hasNormal && !mDbg.disableNormal) ? 1u : 0u;
+				use.useSpecular = (!mDbg.disableSpecular) ? (mat.hasSpecular ? 1u : 2u) : 0u;
+				use.useEmissive = (mat.hasEmissive && !mDbg.disableEmissive) ? 1u : 0u;
+				use.useOpacity = 1u;           // 투명 블렌드
+				use.alphaCut = mDbg.forceAlphaClip ? mDbg.alphaCut : -1.0f;
+				ctx->UpdateSubresource(m_pUseCB, 0, nullptr, &use, 0, 0);
+				ctx->PSSetConstantBuffers(2, 1, &m_pUseCB);
 
-	// (3) 라이트 VP/파라미터 CB: b6  (안전하게 매 프레임 재바인드)
-	ID3D11Buffer* b6 = mCB_Shadow.Get();
-	ctx->VSSetConstantBuffers(6, 1, &b6); // VS에서 쓸 일 있으면 유지
-	ctx->PSSetConstantBuffers(6, 1, &b6);
+				mesh.DrawSubmesh(ctx, (UINT)i);
+				MaterialGPU::Unbind(ctx);
+			}
+		};
 
-
-	// ===== (SHADOW) 본 패스용 바인딩: PS b6 / t5 / s1 =====
-	{
-		struct ShadowCB_ { Matrix LVP; Vector4 Params; } scb;
-		scb.LVP = XMMatrixTranspose(mLightView * mLightProj);     // Shadow PASS에서 만든 멤버 사용
-		scb.Params = Vector4(mShadowCmpBias, 1.0f / mShadowW, 1.0f / mShadowH, 0.0f);
-
-		m_pDeviceContext->UpdateSubresource(mCB_Shadow.Get(), 0, nullptr, &scb, 0, 0);
-
-		ID3D11Buffer* b6 = mCB_Shadow.Get();
-		m_pDeviceContext->PSSetConstantBuffers(6, 1, &b6);           // b6
-
-		ID3D11ShaderResourceView* s = mShadowSRV.Get();
-		m_pDeviceContext->PSSetShaderResources(5, 1, &s);            // t5
-
-		ID3D11SamplerState* cmp = mSamShadowCmp.Get();
-		m_pDeviceContext->PSSetSamplers(1, 1, &cmp);                 // s1
-	}
-
-
-
-	// ===== B) OPAQUE =====
+	// ───────────────────────────────────────────────────────────────
+	// 6) OPAQUE
+	// ───────────────────────────────────────────────────────────────
 	{
 		float bf[4] = { 0,0,0,0 };
-		m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
-
-		if (mDbg.depthWriteOff && m_pDSS_Disabled) {
-			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Disabled, 0);
-		}
-		else {
-			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
-		}
+		ctx->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
+		ctx->OMSetDepthStencilState(mDbg.depthWriteOff && m_pDSS_Disabled ? m_pDSS_Disabled : m_pDSS_Opaque, 0);
 
 		if (mDbg.showOpaque) {
 			BindStatic();
 			if (mTreeX.enabled)  DrawOpaqueOnly(gTree, gTreeMtls, ComposeSRT(mTreeX));
 			if (mCharX.enabled)  DrawOpaqueOnly(gChar, gCharMtls, ComposeSRT(mCharX));
 			if (mZeldaX.enabled) DrawOpaqueOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
+
 			if (mBoxRig && mBoxX.enabled) {
-				mBoxRig->DrawOpaqueOnly(
-					m_pDeviceContext,
-					ComposeSRT(mBoxX),
-					/* view / proj */        view, m_Projection,
-					/* cb/use */             m_pConstantBuffer, m_pUseCB,
-					/* light */              cb.vLightDir, cb.vLightColor,
-					/* eye */                eye,
-					/* material */           m_Ka, m_Ks, m_Shininess, m_Ia,
-					/* disable toggles */    mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
-				);
+				mBoxRig->DrawOpaqueOnly(ctx, ComposeSRT(mBoxX),
+					view, m_Projection, m_pConstantBuffer, m_pUseCB,
+					cb.vLightDir, cb.vLightColor, eye,
+					m_Ka, m_Ks, m_Shininess, m_Ia,
+					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive);
 			}
 			if (mSkinRig && mSkinX.enabled) {
 				BindSkinned();
-				mSkinRig->DrawOpaqueOnly(
-					ctx,
-					ComposeSRT(mSkinX),
-					view, m_Projection,
-					m_pConstantBuffer, m_pUseCB, m_pBoneCB,
-					vLightDir, vLightColor,
-					eye, m_Ka, m_Ks, m_Shininess, m_Ia,
-					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
-				);
-
+				mSkinRig->DrawOpaqueOnly(ctx, ComposeSRT(mSkinX),
+					view, m_Projection, m_pConstantBuffer, m_pUseCB, m_pBoneCB,
+					cb.vLightDir, cb.vLightColor, eye,
+					m_Ka, m_Ks, m_Shininess, m_Ia,
+					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive);
 				BindStatic();
 			}
+
+			// B) OPAQUE 블록 맨 끝쪽에 붙여라
+			if (mDbg.showGrid) {
+				float bf[4] = { 0,0,0,0 };
+				ctx->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
+				ctx->OMSetDepthStencilState(m_pDSS_Opaque, 0);
+				ctx->RSSetState(m_pCullBackRS); // 윗면 보이게 만든 그 상태
+
+				ConstantBuffer local = {};
+				local.mWorld = XMMatrixTranspose(Matrix::Identity);
+				local.mWorldInvTranspose = Matrix::Identity;
+				local.mView = XMMatrixTranspose(view);
+				local.mProjection = XMMatrixTranspose(m_Projection);
+				local.vLightDir = cb.vLightDir;     // ← 조명 동일
+				local.vLightColor = cb.vLightColor;
+				ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
+				ctx->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+				ctx->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+
+				UINT stride = sizeof(DirectX::XMFLOAT3), offset = 0;
+				ctx->IASetInputLayout(mGridIL.Get());
+				ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				ctx->IASetVertexBuffers(0, 1, mGridVB.GetAddressOf(), &stride, &offset);
+				ctx->IASetIndexBuffer(mGridIB.Get(), DXGI_FORMAT_R16_UINT, 0);
+				ctx->VSSetShader(mGridVS.Get(), nullptr, 0);
+				ctx->PSSetShader(mGridPS.Get(), nullptr, 0);
+				ctx->DrawIndexed(mGridIndexCount, 0, 0);
+			}
+
+
 		}
 	}
 
-
-
-
-	// ===== (투명 패스 전) RS 백업 & 필요시 override =====
-	ID3D11RasterizerState* oldRS = nullptr;
-	m_pDeviceContext->RSGetState(&oldRS); // AddRef됨
-
-	// wireframe가 켜져있으면 wire RS(이미 CullNone) 우선, 아니면 CullNone(SOLID)
-	ID3D11RasterizerState* passRS = nullptr;
-	if (mDbg.wireframe && m_pWireRS) {
-		passRS = m_pWireRS;
-	}
-	else if (mDbg.cullNone && m_pDbgRS) { // m_pDbgRS = SOLID + CullNone
-		passRS = m_pDbgRS;
-	}
-	if (passRS) m_pDeviceContext->RSSetState(passRS);
-
-	// ===== B2) CUTOUT (alpha-test) =====
+	// ───────────────────────────────────────────────────────────────
+	// 7) CUTOUT (alpha-test 강제 모드)
+	// ───────────────────────────────────────────────────────────────
 	if (mDbg.forceAlphaClip) {
 		float bf[4] = { 0,0,0,0 };
-		m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF); // 블렌딩 OFF
-		m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0); // 깊이쓰기 ON
+		ctx->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
+		ctx->OMSetDepthStencilState(m_pDSS_Opaque, 0);
 
-		if (mDbg.cullNone && m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS);
+		// RS (wire/cullNone 유지)
+		if (mDbg.cullNone && m_pDbgRS) ctx->RSSetState(m_pDbgRS);
 
 		if (mDbg.showTransparent) {
 			BindStatic();
@@ -889,50 +850,43 @@ void TutorialApp::OnRender()
 
 			if (mBoxRig && mBoxX.enabled) {
 				mBoxRig->DrawAlphaCutOnly(
-					m_pDeviceContext,
+					ctx,
 					ComposeSRT(mBoxX),
-					/* view/proj */       view, m_Projection,
-					/* cb/use */          m_pConstantBuffer, m_pUseCB,
-					/* alphaCut */        mDbg.alphaCut,
-					/* light */           cb.vLightDir, cb.vLightColor,
-					/* eye/material */    eye, m_Ka, m_Ks, m_Shininess, m_Ia,
-					/* toggles */         mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
+					view, m_Projection,
+					m_pConstantBuffer,  
+					m_pUseCB,           
+					mDbg.alphaCut,      
+					cb.vLightDir, cb.vLightColor,
+					eye,
+					m_Ka, m_Ks, m_Shininess, m_Ia,
+					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
 				);
 			}
 
 			if (mSkinRig && mSkinX.enabled) {
 				BindSkinned();
-				mSkinRig->DrawAlphaCutOnly(
-					ctx,
-					ComposeSRT(mSkinX),
-					view, m_Projection,
-					m_pConstantBuffer, m_pUseCB, m_pBoneCB,
-					vLightDir, vLightColor,
-					eye, m_Ka, m_Ks, m_Shininess, m_Ia,
-					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
-				);
+				mSkinRig->DrawAlphaCutOnly(ctx, ComposeSRT(mSkinX),
+					view, m_Projection, m_pConstantBuffer, m_pUseCB, m_pBoneCB,
+					cb.vLightDir, cb.vLightColor, eye,
+					m_Ka, m_Ks, m_Shininess, m_Ia,
+					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive);
 				BindStatic();
-				
 			}
 		}
 	}
 
-	// ===== C) TRANSPARENT =====
+	// ───────────────────────────────────────────────────────────────
+	// 8) TRANSPARENT
+	// ───────────────────────────────────────────────────────────────
 	{
 		ID3D11BlendState* oldBS = nullptr; float oldBF[4]; UINT oldSM = 0xFFFFFFFF;
-		m_pDeviceContext->OMGetBlendState(&oldBS, oldBF, &oldSM);
+		ctx->OMGetBlendState(&oldBS, oldBF, &oldSM);
 		ID3D11DepthStencilState* oldDSS = nullptr; UINT oldSR = 0;
-		m_pDeviceContext->OMGetDepthStencilState(&oldDSS, &oldSR);
+		ctx->OMGetDepthStencilState(&oldDSS, &oldSR);
 
 		float bf[4] = { 0,0,0,0 };
-		m_pDeviceContext->OMSetBlendState(m_pBS_Alpha, bf, 0xFFFFFFFF);
-
-		if (mDbg.depthWriteOff && m_pDSS_Disabled) {
-			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Disabled, 0);
-		}
-		else {
-			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Trans, 0);
-		}
+		ctx->OMSetBlendState(m_pBS_Alpha, bf, 0xFFFFFFFF);
+		ctx->OMSetDepthStencilState(mDbg.depthWriteOff && m_pDSS_Disabled ? m_pDSS_Disabled : m_pDSS_Trans, 0);
 
 		if (mDbg.showTransparent) {
 			BindStatic();
@@ -941,156 +895,87 @@ void TutorialApp::OnRender()
 			if (mZeldaX.enabled) DrawTransparentOnly(gZelda, gZeldaMtls, ComposeSRT(mZeldaX));
 
 			if (mBoxRig && mBoxX.enabled) {
-				mBoxRig->DrawTransparentOnly(
-					m_pDeviceContext,
-					ComposeSRT(mBoxX),
-					/* view/proj */       view, m_Projection,
-					/* cb/use */          m_pConstantBuffer, m_pUseCB,
-					/* light */           cb.vLightDir, cb.vLightColor,
-					/* eye/material */    eye, m_Ka, m_Ks, m_Shininess, m_Ia,
-					/* toggles */         mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
-				);
+				mBoxRig->DrawTransparentOnly(ctx, ComposeSRT(mBoxX),
+					view, m_Projection, m_pConstantBuffer, m_pUseCB,
+					cb.vLightDir, cb.vLightColor, eye,
+					m_Ka, m_Ks, m_Shininess, m_Ia,
+					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive);
 			}
-
 			if (mSkinRig && mSkinX.enabled) {
 				BindSkinned();
-				mSkinRig->DrawTransparentOnly(
-					ctx,
-					ComposeSRT(mSkinX),
-					view, m_Projection,
-					m_pConstantBuffer, m_pUseCB, m_pBoneCB,
-					vLightDir, vLightColor,
-					eye, m_Ka, m_Ks, m_Shininess, m_Ia,
-					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive
-				);
+				mSkinRig->DrawTransparentOnly(ctx, ComposeSRT(mSkinX),
+					view, m_Projection, m_pConstantBuffer, m_pUseCB, m_pBoneCB,
+					cb.vLightDir, cb.vLightColor, eye,
+					m_Ka, m_Ks, m_Shininess, m_Ia,
+					mDbg.disableNormal, mDbg.disableSpecular, mDbg.disableEmissive);
 				BindStatic();
-
 			}
-
-			m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
-			m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldSR);
-			SAFE_RELEASE(oldBS); SAFE_RELEASE(oldDSS);
 		}
 
-		// ===== 투명 패스 끝나고 RS 복원 =====
-		if (oldRS) {
-			m_pDeviceContext->RSSetState(oldRS);
-			oldRS->Release();
-		}
+		ctx->OMSetBlendState(oldBS, oldBF, oldSM);
+		ctx->OMSetDepthStencilState(oldDSS, oldSR);
+		SAFE_RELEASE(oldBS); SAFE_RELEASE(oldDSS);
+	}
 
-		// ===== D) DEBUG: Directional light arrow in world (origin base, unlit) =====
-		if (mDbg.showLightArrow) {
-			// 1) -lightDir로 향하게 (광선 진행방향)
-			Vector3 D = -dir;   // dir은 이미 Vector3임
-			D.Normalize();      // 멤버 Normalize()는 in-place, 반환값 없음
+	// ───────────────────────────────────────────────────────────────
+	// 9) 디버그(광원 화살표, 그리드)
+	// ───────────────────────────────────────────────────────────────
+	if (mDbg.showLightArrow) {
+		Vector3 D = -dirV; D.Normalize();
+		Matrix worldArrow = Matrix::CreateScale(m_ArrowScale) * Matrix::CreateWorld(m_ArrowPos, D, Vector3::UnitY);
 
-			Matrix worldArrow =
-				Matrix::CreateScale(m_ArrowScale) *
-				Matrix::CreateWorld(m_ArrowPos, D, Vector3::UnitY);
+		ConstantBuffer local = cb;
+		local.mWorld = XMMatrixTranspose(worldArrow);
+		local.mWorldInvTranspose = worldArrow.Invert();
+		ctx->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
+		ctx->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
 
-			// 3) CB0 업데이트 (World만 교체)
-			ConstantBuffer local = cb;
-			local.mWorld = XMMatrixTranspose(worldArrow);
-			local.mWorldInvTranspose = worldArrow.Invert();
-			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
-			m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
+		// 상태 백업
+		ID3D11RasterizerState* oRS = nullptr; ctx->RSGetState(&oRS);
+		ID3D11DepthStencilState* oDSS = nullptr; UINT oRef = 0; ctx->OMGetDepthStencilState(&oDSS, &oRef);
+		ID3D11BlendState* oBS = nullptr; float oBF[4]; UINT oSM = 0xFFFFFFFF; ctx->OMGetBlendState(&oBS, oBF, &oSM);
+		ID3D11InputLayout* oIL = nullptr; ctx->IAGetInputLayout(&oIL);
+		ID3D11VertexShader* oVS = nullptr; ctx->VSGetShader(&oVS, nullptr, 0);
+		ID3D11PixelShader* oPS = nullptr; ctx->PSGetShader(&oPS, nullptr, 0);
 
-			// 4) 상태 백업
-			ID3D11RasterizerState* oldRS = nullptr; m_pDeviceContext->RSGetState(&oldRS);
-			ID3D11DepthStencilState* oldDSS = nullptr; UINT oldRef = 0; m_pDeviceContext->OMGetDepthStencilState(&oldDSS, &oldRef);
-			ID3D11BlendState* oldBS = nullptr; float oldBF[4]; UINT oldSM = 0xFFFFFFFF; m_pDeviceContext->OMGetBlendState(&oldBS, oldBF, &oldSM);
-			ID3D11InputLayout* oldIL = nullptr; m_pDeviceContext->IAGetInputLayout(&oldIL);
-			ID3D11VertexShader* oldVS = nullptr; m_pDeviceContext->VSGetShader(&oldVS, nullptr, 0);
-			ID3D11PixelShader* oldPS = nullptr; m_pDeviceContext->PSGetShader(&oldPS, nullptr, 0);
+		float bf[4] = { 0,0,0,0 };
+		ctx->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
+		ctx->OMSetDepthStencilState(m_pDSS_Opaque, 0);
+		if (m_pDbgRS) ctx->RSSetState(m_pDbgRS);
 
-			// 5) 파이프라인 바인드 (깊이 ON, 블렌드 OFF, CullNone)
-			float bf[4] = { 0,0,0,0 };
-			m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
-			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
-			if (m_pDbgRS) m_pDeviceContext->RSSetState(m_pDbgRS);
+		UINT stride = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT4), offset = 0;
+		ctx->IASetInputLayout(m_pDbgIL);
+		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		ctx->IASetVertexBuffers(0, 1, &m_pArrowVB, &stride, &offset);
+		ctx->IASetIndexBuffer(m_pArrowIB, DXGI_FORMAT_R16_UINT, 0);
+		ctx->VSSetShader(m_pDbgVS, nullptr, 0);
+		ctx->PSSetShader(m_pDbgPS, nullptr, 0);
 
-			UINT stride = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT4);
-			UINT offset = 0;
-			m_pDeviceContext->IASetInputLayout(m_pDbgIL);
-			m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-			m_pDeviceContext->IASetVertexBuffers(0, 1, &m_pArrowVB, &stride, &offset);
-			m_pDeviceContext->IASetIndexBuffer(m_pArrowIB, DXGI_FORMAT_R16_UINT, 0);
-			m_pDeviceContext->VSSetShader(m_pDbgVS, nullptr, 0);
-			m_pDeviceContext->PSSetShader(m_pDbgPS, nullptr, 0);
+		const UINT indexCount = 6 + 24 + 6 + 12;
+		const DirectX::XMFLOAT4 kBright = { 1.0f, 0.95f, 0.2f, 1.0f };
+		ctx->UpdateSubresource(m_pDbgCB, 0, nullptr, &kBright, 0, 0);
+		ctx->PSSetConstantBuffers(3, 1, &m_pDbgCB);
 
-			// 6) Draw
-			const UINT indexCount = 6   // back
-				+ 24 // sides
-				+ 6  // head base
-				+ 12;// head sides
+		ID3D11ShaderResourceView* nullAll[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
+		ctx->PSSetShaderResources(0, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT, nullAll);
 
-			// 항상 밝은 노랑(원하면 바꿔)
-			const DirectX::XMFLOAT4 kBright = { 1.0f, 0.95f, 0.2f, 1.0f };
-			m_pDeviceContext->UpdateSubresource(m_pDbgCB, 0, nullptr, &kBright, 0, 0);
-			m_pDeviceContext->PSSetConstantBuffers(3, 1, &m_pDbgCB);
+		ctx->DrawIndexed(indexCount, 0, 0);
 
-			// 혹시 남아있는 SRV 상태가 이상하게 영향 주는 카드가 있어서, 그냥 싹 언바인드
-			ID3D11ShaderResourceView* nullSRV[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
-			m_pDeviceContext->PSSetShaderResources(0, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT, nullSRV);
-
-			m_pDeviceContext->DrawIndexed(indexCount, 0, 0);
-
-			// 7) 상태 복원
-			m_pDeviceContext->VSSetShader(oldVS, nullptr, 0);
-			m_pDeviceContext->PSSetShader(oldPS, nullptr, 0);
-			m_pDeviceContext->IASetInputLayout(oldIL);
-			m_pDeviceContext->OMSetBlendState(oldBS, oldBF, oldSM);
-			m_pDeviceContext->OMSetDepthStencilState(oldDSS, oldRef);
-			m_pDeviceContext->RSSetState(oldRS);
-			SAFE_RELEASE(oldVS); SAFE_RELEASE(oldPS); SAFE_RELEASE(oldIL);
-			SAFE_RELEASE(oldBS); SAFE_RELEASE(oldDSS); SAFE_RELEASE(oldRS);
-		}
-
-		// ===== Debug Grid (opaque, receives shadow) =====
-		{
-			// 상태 설정 (불투명)
-			float bf[4] = { 0,0,0,0 };
-			m_pDeviceContext->OMSetBlendState(nullptr, bf, 0xFFFFFFFF);
-			m_pDeviceContext->OMSetDepthStencilState(m_pDSS_Opaque, 0);
-			m_pDeviceContext->RSSetState(m_pCullBackRS); // 위쪽을 보게 CCW로 만들었음
-
-			// CB0: World(=Identity), 나머지는 현재 view/proj 그대로
-			ConstantBuffer local = {};
-			local.mWorld = XMMatrixTranspose(Matrix::Identity);
-			local.mWorldInvTranspose = Matrix::Identity;
-			local.mView = XMMatrixTranspose(view);
-			local.mProjection = XMMatrixTranspose(m_Projection);
-			local.vLightDir = cb.vLightDir;
-			local.vLightColor = cb.vLightColor;
-			m_pDeviceContext->UpdateSubresource(m_pConstantBuffer, 0, nullptr, &local, 0, 0);
-			m_pDeviceContext->VSSetConstantBuffers(0, 1, &m_pConstantBuffer);
-			m_pDeviceContext->PSSetConstantBuffers(0, 1, &m_pConstantBuffer);
-
-			// b1(ambient, kA 등) 이미 바인딩되어 있음 (위에서 m_pBlinnCB)
-
-			UINT stride = sizeof(DirectX::XMFLOAT3);
-			UINT offset = 0;
-			m_pDeviceContext->IASetInputLayout(mGridIL.Get());
-			m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-			m_pDeviceContext->IASetVertexBuffers(0, 1, mGridVB.GetAddressOf(), &stride, &offset);
-			m_pDeviceContext->IASetIndexBuffer(mGridIB.Get(), DXGI_FORMAT_R16_UINT, 0);
-			m_pDeviceContext->VSSetShader(mGridVS.Get(), nullptr, 0);
-			m_pDeviceContext->PSSetShader(mGridPS.Get(), nullptr, 0);
-
-			// 섀도우 사용: 이미 위에서 PS b6/t5/s1 바인딩되어 있어야 함
-			m_pDeviceContext->DrawIndexed(mGridIndexCount, 0, 0);
-
-			// 필요시 메쉬 셰이더로 복구 (아래에 다시 BindStatic 있으니 생략 가능)
-		}
-
-
-
+		// 상태 복구
+		ctx->VSSetShader(oVS, nullptr, 0);
+		ctx->PSSetShader(oPS, nullptr, 0);
+		ctx->IASetInputLayout(oIL);
+		ctx->OMSetBlendState(oBS, oBF, oSM);
+		ctx->OMSetDepthStencilState(oDSS, oRef);
+		ctx->RSSetState(oRS);
+		SAFE_RELEASE(oVS); SAFE_RELEASE(oPS); SAFE_RELEASE(oIL);
+		SAFE_RELEASE(oBS); SAFE_RELEASE(oDSS); SAFE_RELEASE(oRS);
+	}
 
 #ifdef _DEBUG
-		UpdateImGUI();
+	UpdateImGUI();
 #endif
-		m_pSwapChain->Present(1, 0);
-	}
+	m_pSwapChain->Present(1, 0);
 }
 
 //================================================================================================
@@ -1102,220 +987,108 @@ bool TutorialApp::InitScene()
 	CreateShadowResources(m_pDevice);
 	CreateDepthOnlyShaders(m_pDevice);
 
-	// 1) PNTT 셰이더/IL =================================================================
-	{
-		ID3D10Blob* vsb = nullptr;
-		HR_T(CompileShaderFromFile(L"Shader/VertexShader.hlsl", "main", "vs_5_0", &vsb));
-		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pMeshVS));
+	using Microsoft::WRL::ComPtr;
 
-		D3D11_INPUT_ELEMENT_DESC il[] =
-		{
+	// ---------- helpers ----------
+	auto Compile = [&](const wchar_t* path, const char* entry, const char* profile, ComPtr<ID3DBlob>& blob) {
+		HR_T(CompileShaderFromFile(path, entry, profile, &blob));
+		};
+	auto CreateVS = [&](ComPtr<ID3DBlob>& blob, ID3D11VertexShader** outVS) {
+		HR_T(m_pDevice->CreateVertexShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, outVS));
+		};
+	auto CreatePS = [&](ComPtr<ID3DBlob>& blob, ID3D11PixelShader** outPS) {
+		HR_T(m_pDevice->CreatePixelShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, outPS));
+		};
+	auto CreateIL = [&](const D3D11_INPUT_ELEMENT_DESC* il, UINT cnt, ComPtr<ID3DBlob>& vsBlob, ID3D11InputLayout** outIL) {
+		HR_T(m_pDevice->CreateInputLayout(il, cnt, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), outIL));
+		};
+
+	// =========================================================
+	// 1) Mesh(PNTT) shaders & IL
+	// =========================================================
+	{
+		ComPtr<ID3DBlob> vsb, psb;
+		Compile(L"Shader/VertexShader.hlsl", "main", "vs_5_0", vsb);
+		CreateVS(vsb, &m_pMeshVS);
+
+		const D3D11_INPUT_ELEMENT_DESC IL_PNTT[] = {
 			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 			{ "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 			{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 			{ "TANGENT",  0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 		};
+		CreateIL(IL_PNTT, _countof(IL_PNTT), vsb, &m_pMeshIL);
 
-		HR_T(m_pDevice->CreateInputLayout(il, _countof(il), vsb->GetBufferPointer(), vsb->GetBufferSize(), &m_pMeshIL));
-		SAFE_RELEASE(vsb);
-
-		ID3D10Blob* psb = nullptr;
-		HR_T(CompileShaderFromFile(L"Shader/PixelShader.hlsl", "main", "ps_5_0", &psb));
-		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pMeshPS));
-		SAFE_RELEASE(psb);
+		Compile(L"Shader/PixelShader.hlsl", "main", "ps_5_0", psb);
+		CreatePS(psb, &m_pMeshPS);
 	}
 
-	// === DebugColor shaders / IL ===
+	// =========================================================
+	// 2) DebugColor shaders & IL
+	// =========================================================
 	{
-		ID3D10Blob* vsb = nullptr;
-		HR_T(CompileShaderFromFile(L"../Resource/DebugColor_VS.hlsl", "main", "vs_5_0", &vsb));
-		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pDbgVS));
+		ComPtr<ID3DBlob> vsb, psb;
+		Compile(L"../Resource/DebugColor_VS.hlsl", "main", "vs_5_0", vsb);
+		CreateVS(vsb, &m_pDbgVS);
 
-		D3D11_INPUT_ELEMENT_DESC il[] = {
-			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		const D3D11_INPUT_ELEMENT_DESC IL_DBG[] = {
+			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 			{ "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 		};
-		HR_T(m_pDevice->CreateInputLayout(il, _countof(il), vsb->GetBufferPointer(), vsb->GetBufferSize(), &m_pDbgIL));
-		SAFE_RELEASE(vsb);
+		CreateIL(IL_DBG, _countof(IL_DBG), vsb, &m_pDbgIL);
 
-		ID3D10Blob* psb = nullptr;
-		HR_T(CompileShaderFromFile(L"../Resource/DebugColor_PS.hlsl", "main", "ps_5_0", &psb));
-		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pDbgPS));
-		SAFE_RELEASE(psb);
+		Compile(L"../Resource/DebugColor_PS.hlsl", "main", "ps_5_0", psb);
+		CreatePS(psb, &m_pDbgPS);
 	}
 
-	// ===== Skinned VS(+IL) =====
+	// =========================================================
+	// 3) Skinned VS(+IL)
+	// =========================================================
 	{
 		D3D_SHADER_MACRO defs[] = { {"SKINNED","1"}, {nullptr,nullptr} };
+		ComPtr<ID3DBlob> vsb;
+		HR_T(D3DCompileFromFile(L"Shader/VertexShaderSkinning.hlsl",
+			defs, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+			"main", "vs_5_0", 0, 0, &vsb, nullptr));
+		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pSkinnedVS));
 
-		ID3DBlob* vsbSkin = nullptr;
-		HR_T(D3DCompileFromFile(
-			L"Shader/VertexShaderSkinning.hlsl",
-			defs,
-			D3D_COMPILE_STANDARD_FILE_INCLUDE,
-			"main", "vs_5_0", 0, 0,
-			&vsbSkin, nullptr));
-
-		HR_T(m_pDevice->CreateVertexShader(
-			vsbSkin->GetBufferPointer(),
-			vsbSkin->GetBufferSize(),
-			nullptr,
-			&m_pSkinnedVS));
-
-		// 스키닝용 InputLayout (PNTT + BI/BW)
-		D3D11_INPUT_ELEMENT_DESC ILD_SKIN[] = {
-			{"POSITION",     0, DXGI_FORMAT_R32G32B32_FLOAT,         0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0},
-			{"NORMAL",       0, DXGI_FORMAT_R32G32B32_FLOAT,         0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
-			{"TEXCOORD",     0, DXGI_FORMAT_R32G32_FLOAT,            0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0},
-			{"TANGENT",      0, DXGI_FORMAT_R32G32B32A32_FLOAT,      0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0},
-			{"BLENDINDICES", 0, DXGI_FORMAT_R8G8B8A8_UINT,           0, 48, D3D11_INPUT_PER_VERTEX_DATA, 0},
-			{"BLENDWEIGHT",  0, DXGI_FORMAT_R32G32B32A32_FLOAT,      0, 52, D3D11_INPUT_PER_VERTEX_DATA, 0},
+		const D3D11_INPUT_ELEMENT_DESC IL_SKIN[] = {
+			{"POSITION",     0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+			{"NORMAL",       0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
+			{"TEXCOORD",     0, DXGI_FORMAT_R32G32_FLOAT,       0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0},
+			{"TANGENT",      0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0},
+			{"BLENDINDICES", 0, DXGI_FORMAT_R8G8B8A8_UINT,      0, 48, D3D11_INPUT_PER_VERTEX_DATA, 0},
+			{"BLENDWEIGHT",  0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 52, D3D11_INPUT_PER_VERTEX_DATA, 0},
 		};
-		HR_T(m_pDevice->CreateInputLayout(
-			ILD_SKIN, _countof(ILD_SKIN),
-			vsbSkin->GetBufferPointer(),
-			vsbSkin->GetBufferSize(),
-			&m_pSkinnedIL));
-
-		SAFE_RELEASE(vsbSkin);
+		CreateIL(IL_SKIN, _countof(IL_SKIN), vsb, &m_pSkinnedIL);
 	}
 
-	// ===== Bone Palette CB (VS b4) =====
+	// =========================================================
+	// 4) Constant Buffers & Samplers
+	// =========================================================
 	{
-		D3D11_BUFFER_DESC cbd{};
-		cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-		cbd.Usage = D3D11_USAGE_DEFAULT;
-		cbd.ByteWidth = sizeof(DirectX::XMFLOAT4X4) * 256; // 256 bones 가정
-		HR_T(m_pDevice->CreateBuffer(&cbd, nullptr, &m_pBoneCB));
-	}
-
-	// === Debug Arrow mesh (월드축 +Z 기준) ===
-	{
-		struct V { DirectX::XMFLOAT3 p; DirectX::XMFLOAT4 c; };
-		// 굵기/길이(원하면 숫자만 바꿔)
-		const float halfT = 6.0f;     // 샤프트 반두께 → 전체 두께 12
-		const float shaftLen = 120.0f;   // 샤프트 길이
-		const float headLen = 30.0f;    // 화살촉 길이
-		const float headHalf = 10.0f;    // 화살촉 베이스 반폭
-		const DirectX::XMFLOAT4 YELLOW = { 1.0f, 0.9f, 0.1f, 1.0f };
-
-		// 인덱스 매핑용
-		enum {
-			s0, s1, s2, s3, s4, s5, s6, s7, // shaft 8
-			h0, h1, h2, h3,                 // head base 4
-			tip,                            // tip 1
-			COUNT
-		};
-		const float zEps = 0.05f; // 0.01~0.2 사이
-
-		V verts[COUNT] = {
-			// shaft back(z=0)
-			{{-halfT,-halfT, 0}, YELLOW}, {{+halfT,-halfT, 0}, YELLOW},
-			{{+halfT,+halfT, 0}, YELLOW}, {{-halfT,+halfT, 0}, YELLOW},
-			// shaft front(z=shaftLen)
-			{{-halfT,-halfT, shaftLen}, YELLOW}, {{+halfT,-halfT, shaftLen}, YELLOW},
-			{{+halfT,+halfT, shaftLen}, YELLOW}, {{-halfT,+halfT, shaftLen}, YELLOW},
-
-
-			{{-headHalf,-headHalf, shaftLen}, YELLOW},
-			{{+headHalf,-headHalf, shaftLen}, YELLOW},
-			{{+headHalf,+headHalf, shaftLen}, YELLOW},
-			{{-headHalf,+headHalf, shaftLen}, YELLOW},
-
-			// tip
-			{{0,0, shaftLen + headLen}, YELLOW},
-		};
-
-
-		uint16_t idx[] = {
-			s0,s2,s1,  s0,s3,s2,
-			s0,s1,s5,  s0,s5,s4,
-			s1,s2,s6,  s1,s6,s5,
-			s3,s7,s6,  s3,s6,s2,
-			s0,s4,s7,  s0,s7,s3,
-
-			// head base cap
-			h2,h1,h0,
-			h3,h2,h0,
-			// head sides
-			h0,h1,tip,
-			h1,h2,tip,
-			h2,h3,tip,
-			h3,h0,tip,
-		};
-
-		// VB
-		D3D11_BUFFER_DESC vbd{};
-		vbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-		vbd.Usage = D3D11_USAGE_IMMUTABLE;
-		vbd.ByteWidth = sizeof(verts);
-		D3D11_SUBRESOURCE_DATA vinit{ verts };
-		HR_T(m_pDevice->CreateBuffer(&vbd, &vinit, &m_pArrowVB));
-
-		// IB
-		D3D11_BUFFER_DESC ibd{};
-		ibd.BindFlags = D3D11_BIND_INDEX_BUFFER;
-		ibd.Usage = D3D11_USAGE_IMMUTABLE;
-		ibd.ByteWidth = sizeof(idx);
-		D3D11_SUBRESOURCE_DATA iinit{ idx };
-		HR_T(m_pDevice->CreateBuffer(&ibd, &iinit, &m_pArrowIB));
-	}
-
-	// ===== 초기 트랜스폼 스냅샷 =====
-	mTreeX.pos = { -100, -150, 100 };  mTreeX.initPos = mTreeX.pos;
-	mTreeX.scl = { 100,100,100 };
-	mCharX.pos = { 100, -150, 100 };  mCharX.initPos = mCharX.pos;
-	mZeldaX.pos = { 0, -150, 250 };  mZeldaX.initPos = mZeldaX.pos;
-	mBoxX.pos = { -200, -300, 400 };
-	mSkinX.pos = { 200, -150, 400 };
-
-	mTreeX.enabled = mCharX.enabled = mZeldaX.enabled = mBoxX.enabled = false; // 초기 설정 숨기기
-
-	mTreeX.initScl = mTreeX.scl; mCharX.initScl = mCharX.scl; mZeldaX.initScl = mZeldaX.scl;
-	mTreeX.initRotD = mTreeX.rotD; mCharX.initRotD = mCharX.rotD; mZeldaX.initRotD = mZeldaX.rotD;
-
-	mBoxX.initScl = mBoxX.scl;	mBoxX.initRotD = mBoxX.rotD; mBoxX.initPos = mBoxX.pos;
-	mSkinX.initScl = mSkinX.scl; mSkinX.initRotD = mSkinX.rotD; mSkinX.initPos = mSkinX.pos;
-	
-	// PS b3: dbgColor
-	{
-		D3D11_BUFFER_DESC bd{};
-		bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-		bd.Usage = D3D11_USAGE_DEFAULT;
-		bd.ByteWidth = 16; // float4 = 16
-		HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pDbgCB));
-	}
-
-	// 2) 상수버퍼(CB0, b1, b2) + 샘플러 ==================================================
-	{
-		// CB0: World/View/Proj/WorldInvTranspose + Light
-		if (!m_pConstantBuffer) {
+		auto MakeCB = [&](UINT bytes, ID3D11Buffer** out) {
 			D3D11_BUFFER_DESC bd{};
 			bd.Usage = D3D11_USAGE_DEFAULT;
 			bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-			bd.ByteWidth = sizeof(ConstantBuffer);
-			HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pConstantBuffer));
+			bd.ByteWidth = bytes;
+			HR_T(m_pDevice->CreateBuffer(&bd, nullptr, out));
+			};
+
+		if (!m_pConstantBuffer) MakeCB(sizeof(ConstantBuffer), &m_pConstantBuffer);
+		if (!m_pBlinnCB)        MakeCB(sizeof(BlinnPhongCB), &m_pBlinnCB);
+		if (!m_pUseCB)          MakeCB(sizeof(UseCB), &m_pUseCB);
+
+		// Bone palette (VS b4)
+		if (!m_pBoneCB) {
+			D3D11_BUFFER_DESC cbd{};
+			cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+			cbd.Usage = D3D11_USAGE_DEFAULT;
+			cbd.ByteWidth = sizeof(DirectX::XMFLOAT4X4) * 256; // 256 bones
+			HR_T(m_pDevice->CreateBuffer(&cbd, nullptr, &m_pBoneCB));
 		}
 
-		// BlinnPhong(b1): Eye, kA, kSAlpha, I_ambient
-		if (!m_pBlinnCB) {
-			D3D11_BUFFER_DESC bd{};
-			bd.Usage = D3D11_USAGE_DEFAULT;
-			bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-			bd.ByteWidth = sizeof(BlinnPhongCB);
-			HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pBlinnCB));
-		}
-
-		// UseCB(b2): 텍스처 사용 플래그 + alphaCut
-		if (!m_pUseCB) {
-			D3D11_BUFFER_DESC bd{};
-			bd.Usage = D3D11_USAGE_DEFAULT;
-			bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-			bd.ByteWidth = sizeof(UseCB);
-			HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pUseCB));
-		}
-
-		// PS 샘플러(Linear Wrap)
+		// PS sampler (linear wrap)
 		if (!m_pSamplerLinear) {
 			D3D11_SAMPLER_DESC sd{};
 			sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -1323,239 +1096,211 @@ bool TutorialApp::InitScene()
 			sd.MaxLOD = D3D11_FLOAT32_MAX;
 			HR_T(m_pDevice->CreateSamplerState(&sd, &m_pSamplerLinear));
 		}
+
+		// Debug color CB (PS b3)
+		if (!m_pDbgCB) {
+			D3D11_BUFFER_DESC bd{};
+			bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+			bd.Usage = D3D11_USAGE_DEFAULT;
+			bd.ByteWidth = 16; // float4
+			HR_T(m_pDevice->CreateBuffer(&bd, nullptr, &m_pDbgCB));
+		}
 	}
 
-	// 3) FBX 로딩 + GPU 업로드 ============================================================
+	// =========================================================
+	// 5) Debug Arrow (geometry)
+	// =========================================================
 	{
-		// 확장 임포터 + GPU 빌더
+		struct V { DirectX::XMFLOAT3 p; DirectX::XMFLOAT4 c; };
+		const float halfT = 6.0f, shaftLen = 120.0f, headLen = 30.0f, headHalf = 10.0f;
+		const DirectX::XMFLOAT4 Y = { 1.0f, 0.9f, 0.1f, 1.0f };
+
+		enum { s0, s1, s2, s3, s4, s5, s6, s7, h0, h1, h2, h3, tip, COUNT };
+		V v[COUNT] = {
+			{{-halfT,-halfT,0},Y}, {{+halfT,-halfT,0},Y}, {{+halfT,+halfT,0},Y}, {{-halfT,+halfT,0},Y},
+			{{-halfT,-halfT,shaftLen},Y}, {{+halfT,-halfT,shaftLen},Y}, {{+halfT,+halfT,shaftLen},Y}, {{-halfT,+halfT,shaftLen},Y},
+			{{-headHalf,-headHalf,shaftLen},Y}, {{+headHalf,-headHalf,shaftLen},Y},
+			{{+headHalf,+headHalf,shaftLen},Y}, {{-headHalf,+headHalf,shaftLen},Y},
+			{{0,0,shaftLen + headLen},Y},
+		};
+		const uint16_t idx[] = {
+			s0,s2,s1, s0,s3,s2, s0,s1,s5, s0,s5,s4, s1,s2,s6, s1,s6,s5, s3,s7,s6, s3,s6,s2, s0,s4,s7, s0,s7,s3,
+			h2,h1,h0, h3,h2,h0, h0,h1,tip, h1,h2,tip, h2,h3,tip, h3,h0,tip,
+		};
+
+		// VB
+		D3D11_BUFFER_DESC vbd{ sizeof(v), D3D11_USAGE_IMMUTABLE, D3D11_BIND_VERTEX_BUFFER };
+		D3D11_SUBRESOURCE_DATA vinit{ v };
+		HR_T(m_pDevice->CreateBuffer(&vbd, &vinit, &m_pArrowVB));
+		// IB
+		D3D11_BUFFER_DESC ibd{ sizeof(idx), D3D11_USAGE_IMMUTABLE, D3D11_BIND_INDEX_BUFFER };
+		D3D11_SUBRESOURCE_DATA iinit{ idx };
+		HR_T(m_pDevice->CreateBuffer(&ibd, &iinit, &m_pArrowIB));
+	}
+
+	// =========================================================
+	// 6) Initial transforms
+	// =========================================================
+	mTreeX.pos = { -100, -150, 100 };  mTreeX.initPos = mTreeX.pos;  mTreeX.scl = { 100,100,100 };
+	mCharX.pos = { 100, -150, 100 };  mCharX.initPos = mCharX.pos;
+	mZeldaX.pos = { 0, -150, 250 };  mZeldaX.initPos = mZeldaX.pos;
+	mBoxX.pos = { -200, -300, 400 };
+	mSkinX.pos = { 200, -150, 400 };
+
+	mTreeX.enabled = mCharX.enabled = mZeldaX.enabled = mBoxX.enabled = false;
+
+	mTreeX.initScl = mTreeX.scl; mCharX.initScl = mCharX.scl; mZeldaX.initScl = mZeldaX.scl;
+	mTreeX.initRotD = mTreeX.rotD; mCharX.initRotD = mCharX.rotD; mZeldaX.initRotD = mZeldaX.rotD;
+	mBoxX.initScl = mBoxX.scl; mBoxX.initRotD = mBoxX.rotD; mBoxX.initPos = mBoxX.pos;
+	mSkinX.initScl = mSkinX.scl; mSkinX.initRotD = mSkinX.rotD; mSkinX.initPos = mSkinX.pos;
+
+	// =========================================================
+	// 7) Load FBX + build GPU
+	// =========================================================
+	{
 		auto BuildAll = [&](const std::wstring& fbx, const std::wstring& texDir,
 			StaticMesh& mesh, std::vector<MaterialGPU>& mtls)
 			{
 				MeshData_PNTT cpu;
-				// flipUV = true 권장, 좌표계는 LH
 				if (!AssimpImporterEx::LoadFBX_PNTT_AndMaterials(fbx, cpu, /*flipUV*/true, /*leftHanded*/true))
 					throw std::runtime_error("FBX load failed");
-
 				if (!mesh.Build(m_pDevice, cpu))
 					throw std::runtime_error("Mesh build failed");
 
 				mtls.resize(cpu.materials.size());
-				for (size_t i = 0; i < cpu.materials.size(); ++i) {
+				for (size_t i = 0; i < cpu.materials.size(); ++i)
 					mtls[i].Build(m_pDevice, cpu.materials[i], texDir);
-				}
 			};
 
 		BuildAll(L"../Resource/Tree/Tree.fbx", L"../Resource/Tree/", gTree, gTreeMtls);
 		BuildAll(L"../Resource/Character/Character.fbx", L"../Resource/Character/", gChar, gCharMtls);
 		BuildAll(L"../Resource/Zelda/zeldaPosed001.fbx", L"../Resource/Zelda/", gZelda, gZeldaMtls);
-
 		BuildAll(L"../Resource/BoxHuman/BoxHuman.fbx", L"../Resource/BoxHuman/", gBoxHuman, gBoxMtls);
-		mBoxRig = RigidSkeletal::LoadFromFBX(
-			m_pDevice,
+
+		mBoxRig = RigidSkeletal::LoadFromFBX(m_pDevice,
 			L"../Resource/BoxHuman/BoxHuman.fbx",
-			L"../Resource/BoxHuman/"
-		);
+			L"../Resource/BoxHuman/");
 
-		// ===== SkinningTest.fbx 로드 =====
-		{
-			mSkinRig = SkinnedSkeletal::LoadFromFBX(
-				m_pDevice,
-				L"../Resource/Skinning/SkinningTest.fbx",   // 너의 리소스 경로에 맞춰 조정
-				L"../Resource/Skinning/"                    // 텍스처 루트
-			);
-		}
+		mSkinRig = SkinnedSkeletal::LoadFromFBX(m_pDevice,
+			L"../Resource/Skinning/SkinningTest.fbx",
+			L"../Resource/Skinning/");
 
-		if (mSkinRig && m_pBoneCB) {
-			mSkinRig->WarmupBoneCB(m_pDeviceContext, m_pBoneCB);
-		}
+		if (mSkinRig && m_pBoneCB) mSkinRig->WarmupBoneCB(m_pDeviceContext, m_pBoneCB);
 	}
-	// === Rasterizer states ===
+
+	// =========================================================
+	// 8) Rasterizer / Depth / Blend states
+	// =========================================================
 	{
-		// BACK CULL (기본)
-		D3D11_RASTERIZER_DESC rsBack{};
-		rsBack.FillMode = D3D11_FILL_SOLID;
-		rsBack.CullMode = D3D11_CULL_BACK;
-		rsBack.FrontCounterClockwise = FALSE;
-		rsBack.DepthClipEnable = TRUE;
-		HR_T(m_pDevice->CreateRasterizerState(&rsBack, &m_pCullBackRS));
+		// Back-cull (default)
+		D3D11_RASTERIZER_DESC rsBack{}; rsBack.FillMode = D3D11_FILL_SOLID; rsBack.CullMode = D3D11_CULL_BACK;
+		rsBack.DepthClipEnable = TRUE; HR_T(m_pDevice->CreateRasterizerState(&rsBack, &m_pCullBackRS));
 
-		// SOLID + Cull None (양면) 
-		D3D11_RASTERIZER_DESC rsNone{};
-		rsNone.FillMode = D3D11_FILL_SOLID;
-		rsNone.CullMode = D3D11_CULL_NONE;
-		rsNone.FrontCounterClockwise = FALSE;
-		rsNone.DepthClipEnable = TRUE;
-		HR_T(m_pDevice->CreateRasterizerState(&rsNone, &m_pDbgRS));
+		// Solid + Cull None
+		D3D11_RASTERIZER_DESC rsNone{}; rsNone.FillMode = D3D11_FILL_SOLID; rsNone.CullMode = D3D11_CULL_NONE;
+		rsNone.DepthClipEnable = TRUE; HR_T(m_pDevice->CreateRasterizerState(&rsNone, &m_pDbgRS));
 
-		// 와이어프레임 + Cull None
-		D3D11_RASTERIZER_DESC rw{};
-		rw.FillMode = D3D11_FILL_WIREFRAME;
-		rw.CullMode = D3D11_CULL_NONE;
-		rw.FrontCounterClockwise = FALSE;
-		rw.DepthClipEnable = TRUE;
-		HR_T(m_pDevice->CreateRasterizerState(&rw, &m_pWireRS));
+		// Wireframe + Cull None
+		D3D11_RASTERIZER_DESC rw{}; rw.FillMode = D3D11_FILL_WIREFRAME; rw.CullMode = D3D11_CULL_NONE;
+		rw.DepthClipEnable = TRUE; HR_T(m_pDevice->CreateRasterizerState(&rw, &m_pWireRS));
 
-		// 깊이 끔(디버깅)
-		D3D11_DEPTH_STENCIL_DESC dsOff{};
-		dsOff.DepthEnable = FALSE;
-		dsOff.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-		dsOff.StencilEnable = FALSE;
+		// Depth OFF (debug)
+		D3D11_DEPTH_STENCIL_DESC dsOff{}; dsOff.DepthEnable = FALSE; dsOff.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
 		HR_T(m_pDevice->CreateDepthStencilState(&dsOff, &m_pDSS_Disabled));
-	}
 
-	//======================  SKYBOX: Shaders / IL  ======================
-	{
-		ID3D10Blob* vsb = nullptr;
-		HR_T(CompileShaderFromFile(L"../Resource/Sky_VS.hlsl", "main", "vs_5_0", &vsb));
-		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &m_pSkyVS));
+		// Opaque depth (write ON)
+		D3D11_DEPTH_STENCIL_DESC dsO{}; dsO.DepthEnable = TRUE; dsO.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+		dsO.DepthFunc = D3D11_COMPARISON_LESS_EQUAL; HR_T(m_pDevice->CreateDepthStencilState(&dsO, &m_pDSS_Opaque));
 
-		// Sky VS는 position-only( float3 POSITION ) 기준
-		D3D11_INPUT_ELEMENT_DESC il[] = {
-			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		};
-		HR_T(m_pDevice->CreateInputLayout(il, _countof(il), vsb->GetBufferPointer(), vsb->GetBufferSize(), &m_pSkyIL));
-		SAFE_RELEASE(vsb);
+		// Transparent depth (write OFF)
+		D3D11_DEPTH_STENCIL_DESC dsT{}; dsT.DepthEnable = TRUE; dsT.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+		dsT.DepthFunc = D3D11_COMPARISON_LESS_EQUAL; HR_T(m_pDevice->CreateDepthStencilState(&dsT, &m_pDSS_Trans));
 
-		ID3D10Blob* psb = nullptr;
-		HR_T(CompileShaderFromFile(L"../Resource/Sky_PS.hlsl", "main", "ps_5_0", &psb));
-		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &m_pSkyPS));
-		SAFE_RELEASE(psb);
-	}
-
-	//======================  SKYBOX: Geometry (unit cube)  ======================
-	{
-		struct SkyV { DirectX::XMFLOAT3 pos; };
-
-		const SkyV v[] = {
-			{{-1,-1,-1}}, {{-1,+1,-1}}, {{+1,+1,-1}}, {{+1,-1,-1}}, // back (z-)
-			{{-1,-1,+1}}, {{-1,+1,+1}}, {{+1,+1,+1}}, {{+1,-1,+1}}, // front (z+)
-		};
-		const uint16_t idx[] = {
-			// 각 면 CCW (밖을 향함). Cull FRONT라 내부면이 렌더됨.
-			0,1,2, 0,2,3, // back
-			4,6,5, 4,7,6, // front
-			4,5,1, 4,1,0, // left
-			3,2,6, 3,6,7, // right
-			1,5,6, 1,6,2, // top
-			4,0,3, 4,3,7  // bottom
-		};
-
-		// VB
-		D3D11_BUFFER_DESC vbDesc{}; vbDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-		vbDesc.ByteWidth = UINT(sizeof(v));
-		vbDesc.Usage = D3D11_USAGE_DEFAULT;
-		D3D11_SUBRESOURCE_DATA vinit{}; vinit.pSysMem = v;
-		HR_T(m_pDevice->CreateBuffer(&vbDesc, &vinit, &m_pSkyVB));
-
-		// IB
-		D3D11_BUFFER_DESC ibDesc{}; ibDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
-		ibDesc.ByteWidth = UINT(sizeof(idx));
-		ibDesc.Usage = D3D11_USAGE_DEFAULT;
-		D3D11_SUBRESOURCE_DATA iinit{}; iinit.pSysMem = idx;
-		HR_T(m_pDevice->CreateBuffer(&ibDesc, &iinit, &m_pSkyIB));
-	}
-
-	//======================  SKYBOX: Texture / Sampler  ======================
-	{
-		HR_T(CreateDDSTextureFromFile(m_pDevice,
-			L"../Resource/Cubemap.dds", nullptr, &m_pSkySRV));
-
-		D3D11_SAMPLER_DESC sd{}; // clamp가 세렝게티
-		sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-		sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-		sd.MaxLOD = D3D11_FLOAT32_MAX;
-		HR_T(m_pDevice->CreateSamplerState(&sd, &m_pSkySampler));
-	}
-
-	//======================  SKYBOX: Depth/Raster states  ======================
-	{
-		// depth write 끄고, LEQUAL(sky는 write=ZERO가 핵심)
-		D3D11_DEPTH_STENCIL_DESC sd{};
-		sd.DepthEnable = TRUE;
-		sd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-		sd.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
-		sd.StencilEnable = FALSE;
-		HR_T(m_pDevice->CreateDepthStencilState(&sd, &m_pSkyDSS));
-
-		// 내부 면 렌더링: FRONT 컬링
-		D3D11_RASTERIZER_DESC rs{};
-		rs.FillMode = D3D11_FILL_SOLID;
-		rs.CullMode = D3D11_CULL_FRONT;
-		rs.FrontCounterClockwise = FALSE;
-		HR_T(m_pDevice->CreateRasterizerState(&rs, &m_pSkyRS));
-
-	}
-
-	//======================  ALPHA BLEND / DEPTH STATES  ======================
-	{
-		// Opaque: 깊이쓰기 ON
-		D3D11_DEPTH_STENCIL_DESC dsO{};
-		dsO.DepthEnable = TRUE;
-		dsO.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
-		dsO.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
-		HR_T(m_pDevice->CreateDepthStencilState(&dsO, &m_pDSS_Opaque));
-
-		// Transparent: 깊이쓰기 OFF
-		D3D11_DEPTH_STENCIL_DESC dsT{};
-		dsT.DepthEnable = TRUE;
-		dsT.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO; // 이게 그 중요한 그거임
-		dsT.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
-		HR_T(m_pDevice->CreateDepthStencilState(&dsT, &m_pDSS_Trans));
-
-		// Straight Alpha: Src*SrcA + Dst*(1-SrcA)
-		D3D11_BLEND_DESC bd{};
-		auto& rt = bd.RenderTarget[0];
-		rt.BlendEnable = TRUE;
-		rt.SrcBlend = D3D11_BLEND_SRC_ALPHA;
-		rt.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-		rt.BlendOp = D3D11_BLEND_OP_ADD;
-		rt.SrcBlendAlpha = D3D11_BLEND_ONE;
-		rt.DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
-		rt.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+		// Straight alpha blend
+		D3D11_BLEND_DESC bd{}; auto& rt = bd.RenderTarget[0]; rt.BlendEnable = TRUE;
+		rt.SrcBlend = D3D11_BLEND_SRC_ALPHA; rt.DestBlend = D3D11_BLEND_INV_SRC_ALPHA; rt.BlendOp = D3D11_BLEND_OP_ADD;
+		rt.SrcBlendAlpha = D3D11_BLEND_ONE;  rt.DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA; rt.BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		rt.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 		HR_T(m_pDevice->CreateBlendState(&bd, &m_pBS_Alpha));
 	}
 
-	// ==== 2-1) VB/IB: XZ 평면 두 삼각형 (CCW, 위를 바라보게) ====
+	// =========================================================
+	// 9) Skybox: shaders/IL, geometry, texture/sampler, depth/RS
+	// =========================================================
 	{
-		struct V { DirectX::XMFLOAT3 pos; };
-		float S = mGridHalfSize;
-		float Y = mGridY;
-		V v[4] = {
-			{ {-S, Y, -S} },
-			{ { S, Y, -S} },
-			{ { S, Y,  S} },
-			{ {-S, Y,  S} },
+		// shaders & IL (position-only)
+		ComPtr<ID3DBlob> vsb, psb;
+		Compile(L"../Resource/Sky_VS.hlsl", "main", "vs_5_0", vsb);
+		CreateVS(vsb, &m_pSkyVS);
+		const D3D11_INPUT_ELEMENT_DESC IL_SKY[] = {
+			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 		};
-		// winding flip (윗면이 보이도록 뒤집기)
-		const uint16_t idx[] = { 0, 2, 1,  0, 3, 2 };
+		CreateIL(IL_SKY, _countof(IL_SKY), vsb, &m_pSkyIL);
 
-		mGridIndexCount = 6;
+		Compile(L"../Resource/Sky_PS.hlsl", "main", "ps_5_0", psb);
+		CreatePS(psb, &m_pSkyPS);
 
-		D3D11_BUFFER_DESC vb = { sizeof(v), D3D11_USAGE_IMMUTABLE, D3D11_BIND_VERTEX_BUFFER, 0, 0, 0 };
-		D3D11_SUBRESOURCE_DATA vsd = { v };
-		HR_T(m_pDevice->CreateBuffer(&vb, &vsd, &mGridVB));
+		// geometry (unit cube)
+		struct SkyV { DirectX::XMFLOAT3 pos; };
+		const SkyV v[] = {
+			{{-1,-1,-1}}, {{-1,+1,-1}}, {{+1,+1,-1}}, {{+1,-1,-1}},
+			{{-1,-1,+1}}, {{-1,+1,+1}}, {{+1,+1,+1}}, {{+1,-1,+1}},
+		};
+		const uint16_t idx[] = {
+			0,1,2, 0,2,3,  4,6,5, 4,7,6,  4,5,1, 4,1,0,
+			3,2,6, 3,6,7,  1,5,6, 1,6,2,  4,0,3, 4,3,7
+		};
+		D3D11_BUFFER_DESC vb{ sizeof(v),   D3D11_USAGE_DEFAULT,   D3D11_BIND_VERTEX_BUFFER };
+		D3D11_BUFFER_DESC ib{ sizeof(idx), D3D11_USAGE_DEFAULT,   D3D11_BIND_INDEX_BUFFER };
+		D3D11_SUBRESOURCE_DATA vsd{ v }, isd{ idx };
+		HR_T(m_pDevice->CreateBuffer(&vb, &vsd, &m_pSkyVB));
+		HR_T(m_pDevice->CreateBuffer(&ib, &isd, &m_pSkyIB));
 
-		D3D11_BUFFER_DESC ib = { sizeof(idx), D3D11_USAGE_IMMUTABLE, D3D11_BIND_INDEX_BUFFER, 0, 0, 0 };
-		D3D11_SUBRESOURCE_DATA isd = { idx };
-		HR_T(m_pDevice->CreateBuffer(&ib, &isd, &mGridIB));
+		// texture + sampler
+		HR_T(CreateDDSTextureFromFile(m_pDevice, L"../Resource/Cubemap.dds", nullptr, &m_pSkySRV));
+		D3D11_SAMPLER_DESC ssd{}; ssd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+		ssd.AddressU = ssd.AddressV = ssd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+		ssd.MaxLOD = D3D11_FLOAT32_MAX;
+		HR_T(m_pDevice->CreateSamplerState(&ssd, &m_pSkySampler));
+
+		// depth/raster states
+		D3D11_DEPTH_STENCIL_DESC sd{}; sd.DepthEnable = TRUE; sd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+		sd.DepthFunc = D3D11_COMPARISON_LESS_EQUAL; HR_T(m_pDevice->CreateDepthStencilState(&sd, &m_pSkyDSS));
+		D3D11_RASTERIZER_DESC rs{}; rs.FillMode = D3D11_FILL_SOLID; rs.CullMode = D3D11_CULL_FRONT;
+		HR_T(m_pDevice->CreateRasterizerState(&rs, &m_pSkyRS));
 	}
 
-	// ==== 2-2) 셰이더 & IL ====
+	// =========================================================
+	// 10) Debug Grid: geometry + shaders/IL
+	// =========================================================
 	{
-		Microsoft::WRL::ComPtr<ID3DBlob> vsb, psb;
-		HR_T(CompileShaderFromFile(L"Shader/DbgGrid.hlsl", "VS_Main", "vs_5_0", &vsb));
-		HR_T(CompileShaderFromFile(L"Shader/DbgGrid.hlsl", "PS_Main", "ps_5_0", &psb));
+		// geometry (XZ plane, CCW, up-facing)
+		struct V { DirectX::XMFLOAT3 pos; };
+		const float S = mGridHalfSize, Y = mGridY;
+		V verts[4] = { {{-S,Y,-S}}, {{ S,Y,-S}}, {{ S,Y, S}}, {{-S,Y, S}} };
+		const uint16_t idx[] = { 0,2,1, 0,3,2 };
+		mGridIndexCount = 6;
+
+		D3D11_BUFFER_DESC vb{ sizeof(verts), D3D11_USAGE_IMMUTABLE, D3D11_BIND_VERTEX_BUFFER };
+		D3D11_SUBRESOURCE_DATA vsd{ verts };
+		HR_T(m_pDevice->CreateBuffer(&vb, &vsd, &mGridVB));
+
+		D3D11_BUFFER_DESC ib{ sizeof(idx),   D3D11_USAGE_IMMUTABLE, D3D11_BIND_INDEX_BUFFER };
+		D3D11_SUBRESOURCE_DATA isd{ idx };
+		HR_T(m_pDevice->CreateBuffer(&ib, &isd, &mGridIB));
+
+		// shaders & IL
+		ComPtr<ID3DBlob> vsb, psb;
+		Compile(L"Shader/DbgGrid.hlsl", "VS_Main", "vs_5_0", vsb);
+		Compile(L"Shader/DbgGrid.hlsl", "PS_Main", "ps_5_0", psb);
 		HR_T(m_pDevice->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &mGridVS));
 		HR_T(m_pDevice->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &mGridPS));
 
-		// 입력: POSITION(float3)만
-		D3D11_INPUT_ELEMENT_DESC il[] = {
+		const D3D11_INPUT_ELEMENT_DESC IL_GRID[] = {
 			{ "POSITION",0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 }
 		};
-		HR_T(m_pDevice->CreateInputLayout(il, 1, vsb->GetBufferPointer(), vsb->GetBufferSize(), &mGridIL));
+		CreateIL(IL_GRID, 1, vsb, &mGridIL);
 	}
-
 
 	return true;
 }
@@ -1774,23 +1519,26 @@ void TutorialApp::UpdateImGUI()
 			}
 		}
 
-		// === Lighting ===
-		if (ImGui::CollapsingHeader(u8"Lighting"))
-		{
-			ImGui::SliderAngle("Yaw", &m_LightYaw, -180.0f, 180.0f);
-			ImGui::SliderAngle("Pitch", &m_LightPitch, -89.0f, 89.0f);
-			ImGui::ColorEdit3("Color", (float*)&m_LightColor);
-			ImGui::SliderFloat("Intensity", &m_LightIntensity, 0.0f, 5.0f);
-			if (ImGui::Button(u8"조명 초기화")) {
-				m_LightColor = s_initLightColor;
-				m_LightYaw = s_initLightYaw;
-				m_LightPitch = s_initLightPitch;
-				m_LightIntensity = s_initLightIntensity;
+		if (ImGui::Begin("Shadow / Light Camera"), ImGuiTreeNodeFlags_DefaultOpen) {
+			// === Lighting ===
+			if (ImGui::CollapsingHeader(u8"Lighting"), ImGuiCond_FirstUseEver)
+			{
+				ImGui::SliderAngle("Yaw", &m_LightYaw, -180.0f, 180.0f);
+				ImGui::SliderAngle("Pitch", &m_LightPitch, -89.0f, 89.0f);
+				ImGui::ColorEdit3("Color", (float*)&m_LightColor);
+				ImGui::SliderFloat("Intensity", &m_LightIntensity, 0.0f, 5.0f);
+				if (ImGui::Button(u8"조명 초기화")) {
+					m_LightColor = s_initLightColor;
+					m_LightYaw = s_initLightYaw;
+					m_LightPitch = s_initLightPitch;
+					m_LightIntensity = s_initLightIntensity;
+				}
 			}
-		}
-
-		if (ImGui::Begin("Shadow / Light Camera"), ImGuiCond_FirstUseEver) {
+			
 			ImGui::Checkbox("Show ShadowMap", &mShUI.showSRV);
+			ImGui::Checkbox("Show ShadowGrid", &mDbg.showGrid);
+		
+
 			if (mShUI.showSRV) {
 				// DX11 백엔드는 SRV를 그대로 ImTextureID로 받는다.
 				ImTextureID id = (ImTextureID)mShadowSRV.Get();
