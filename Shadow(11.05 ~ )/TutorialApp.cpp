@@ -1584,7 +1584,9 @@ void TutorialApp::UpdateImGUI()
 			// ── ShadowMap Preview / Grid ────────────────────────────────
 			ImGui::Checkbox("Show ShadowMap", &mShUI.showSRV);
 			ImGui::Checkbox("Show Grid", &mDbg.showGrid);
-
+			ImGui::Checkbox("Use Orthographic", &mShUI.useOrtho);		
+			ImGui::Checkbox("Use followCamera", &mShUI.followCamera);
+			
 			if (mShUI.showSRV) {
 				ImTextureID id = (ImTextureID)mShadowSRV.Get();
 				if (id) ImGui::Image(id, ImVec2(256, 256), ImVec2(0, 0), ImVec2(1, 1));
@@ -1596,12 +1598,6 @@ void TutorialApp::UpdateImGUI()
 			ImGui::DragFloat("FocusDist", &mShUI.focusDist, 0.1f, 0.1f, 5000.0f);
 			ImGui::DragFloat("LightDist", &mShUI.lightDist, 0.1f, 0.1f, 10000.0f);
 			ImGui::DragFloat("Margin", &mShUI.coverMargin, 0.01f, 1.0f, 2.0f);
-
-			// 과제 강제 모드(매 프레임 락)
-			mShUI.followCamera = true;
-			mShUI.useManualPos = false;
-			mShUI.autoCover = true;
-			mShUI.useOrtho = false; // 원근 투영만
 
 			// ── DepthOnly 옵션 ───────────────────────────────────────────
 			ImGui::SeparatorText("DepthOnly");

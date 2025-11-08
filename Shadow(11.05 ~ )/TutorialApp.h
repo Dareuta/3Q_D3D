@@ -187,7 +187,7 @@ private:
 		DirectX::XMFLOAT3 manualPos = { 0, 30, -30 };
 		DirectX::XMFLOAT3 manualTarget = { 0,  0,   0 };
 	} mShUI;
-
+	
 	//============================================================================================
 	// 애니메이션 컨트롤(디버그)
 	//============================================================================================
@@ -219,7 +219,7 @@ private:
 	Microsoft::WRL::ComPtr<ID3D11VertexShader> mGridVS;
 	Microsoft::WRL::ComPtr<ID3D11PixelShader>  mGridPS;
 	UINT   mGridIndexCount = 0;
-	float  mGridHalfSize = 500.0f;  // +- 범위
+	float  mGridHalfSize = 1000.0f;  // +- 범위
 	float  mGridY = -200.0f; // y 높이
 
 	//============================================================================================
@@ -280,8 +280,8 @@ private:
 	float  m_Near = 0.1f;
 	float  m_Far = 5000.0f;
 
-	float  m_LightYaw = DirectX::XMConvertToRadians(180.0f);
-	float  m_LightPitch = DirectX::XMConvertToRadians(70.0f);
+	float  m_LightYaw = DirectX::XMConvertToRadians(-90.0f);
+	float  m_LightPitch = DirectX::XMConvertToRadians(60.0f);
 	Vector3 m_LightColor{ 1,1,1 };
 	float   m_LightIntensity = 1.0f;
 
