@@ -50,6 +50,20 @@ Texture2D txEmissive : register(t3);
 Texture2D txOpacity : register(t4);
 SamplerState samLinear : register(s0);
 
+//--------툰 쉐이딩--------
+// === Toon Shading additions ===
+Texture2D txRamp : register(t6); // 1D처럼 쓰는 램프 텍스처(가로 0..1)
+
+cbuffer ToonCB : register(b7)
+{
+    uint gUseToon; // 0: 끔, 1: 켬
+    uint gToonHalfLambert; // 0/1 (선택) Half-Lambert
+    float gToonSpecStep; // 스펙 단계 임계값(0~1), 예: 0.55
+    float gToonSpecBoost; // 스펙 부스트, 예: 1.0~2.0
+    float gToonShadowMin; // 램프 최저 밝기 바닥(밴딩/먹먹함 완화), 예: 0.02
+    float3 _padTo16; // 16바이트 정렬
+};
+
 // ===== VS input (단일 구조체)
 struct VS_INPUT
 {
@@ -82,6 +96,14 @@ cbuffer ShadowCB : register(b6)
 
 Texture2D<float> txShadow : register(t5);
 SamplerComparisonState samShadow : register(s1);
+
+//툰쉐이더용
+SamplerState samRampPointClamp : register(s2)
+{
+    Filter = MIN_MAG_MIP_POINT; // 또렷하게: POINT
+    AddressU = Clamp;
+    AddressV = Clamp;
+};
 
 // ===== Helpers
 inline float3 OrthonormalizeTangent(float3 N, float3 T)

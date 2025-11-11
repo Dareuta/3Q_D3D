@@ -8,6 +8,7 @@
 
 #include <d3dcompiler.h>
 #include <Directxtk/DDSTextureLoader.h>  // CreateDDSTextureFromFile
+#include <DirectXTK/WICTextureLoader.h>
 
 #pragma comment (lib, "d3d11.lib")
 #pragma comment(lib,"d3dcompiler.lib")
@@ -366,7 +367,7 @@ void TutorialApp::RenderShadowPass(ID3D11DeviceContext* ctx,
 	ctx->OMSetBlendState(nullptr, blend, 0xFFFFFFFF);
 	ID3D11SamplerState* cmp = mSamShadowCmp.Get();
 	ctx->PSSetSamplers(1, 1, &cmp); // s1
-	
+
 	ID3D11SamplerState* lin = m_pSamplerLinear;
 	ctx->PSSetSamplers(0, 1, &lin); // s0 (samLinear) - opacity 샘플링용	
 }
@@ -710,6 +711,26 @@ void TutorialApp::OnRender()
 		ctx->PSSetSamplers(1, 1, &cmp);
 		ctx->PSSetShaderResources(5, 1, &shSRV);
 	}
+
+	// === Toon ramp bind (PS: t6/b7) ===
+	{
+		//툰 셰이딩 바인드
+		ToonCB_ t{};
+		t.useToon = mDbg.useToon ? 1u : 0u;
+		t.halfLambert = mDbg.toonHalfLambert ? 1u : 0u;
+		t.specStep = mDbg.toonSpecStep;
+		t.specBoost = mDbg.toonSpecBoost;
+		t.shadowMin = mDbg.toonShadowMin;
+
+		if (m_pToonCB) {
+			ctx->UpdateSubresource(m_pToonCB, 0, nullptr, &t, 0, 0);
+			ctx->PSSetConstantBuffers(7, 1, &m_pToonCB);      // PS b7
+		}
+		if (m_pRampSRV && mDbg.useToon) {
+			ctx->PSSetShaderResources(6, 1, &m_pRampSRV);     // PS t6
+		}
+	}
+
 
 	// 바인더
 	auto BindStatic = [&]() {
@@ -1120,6 +1141,7 @@ bool TutorialApp::InitScene()
 		if (!m_pConstantBuffer) MakeCB(sizeof(ConstantBuffer), &m_pConstantBuffer);
 		if (!m_pBlinnCB)        MakeCB(sizeof(BlinnPhongCB), &m_pBlinnCB);
 		if (!m_pUseCB)          MakeCB(sizeof(UseCB), &m_pUseCB);
+		if (!m_pToonCB)			MakeCB(sizeof(ToonCB_), &m_pToonCB);
 
 		// Bone palette (VS b4)
 		if (!m_pBoneCB) {
@@ -1344,6 +1366,11 @@ bool TutorialApp::InitScene()
 		CreateIL(IL_GRID, 1, vsb, &mGridIL);
 	}
 
+	{
+		HR_T(DirectX::CreateWICTextureFromFile(
+			m_pDevice, L"../Resource/RampTexture.png", nullptr, &m_pRampSRV));
+	}
+
 	return true;
 }
 
@@ -1472,6 +1499,9 @@ void TutorialApp::UninitScene()
 	SAFE_RELEASE(m_pSkinnedIL);
 	SAFE_RELEASE(m_pSkinnedVS);
 	SAFE_RELEASE(m_pBoneCB);
+	//툰툰
+	SAFE_RELEASE(m_pRampSRV);
+	SAFE_RELEASE(m_pToonCB);
 }
 
 void TutorialApp::UninitD3D()
@@ -1558,12 +1588,22 @@ void TutorialApp::UpdateImGUI()
 			ImGui::Text(u8"카메라 속도 변경: F1 ~ F3");
 			if (ImGui::Button(u8"카메라 초기화")) {
 				m_FovDegree = s_initFov; m_Near = s_initNear; m_Far = s_initFar;
-			}
+			}		
 		}
 
 		//---------------------------------------------------
 
-		if (ImGui::Begin("Shadow / Light Camera")) 
+
+		if (ImGui::Begin("Toon Shading"), ImGuiCond_FirstUseEver) {
+			ImGui::Checkbox("Use Toon", &mDbg.useToon);
+			ImGui::Checkbox("Half-Lambert", &mDbg.toonHalfLambert);
+			ImGui::DragFloat("Spec Step", &mDbg.toonSpecStep, 0.01f, 0.0f, 1.0f, "%.2f");
+			ImGui::DragFloat("Spec Boost", &mDbg.toonSpecBoost, 0.01f, 0.0f, 3.0f, "%.2f");
+			ImGui::DragFloat("Shadow Min", &mDbg.toonShadowMin, 0.005f, 0.0f, 0.10f, "%.3f");
+		}
+		ImGui::End();
+
+		if (ImGui::Begin("Shadow / Light Camera"))
 		{
 			// ── Lighting ────────────────────────────────────────────────
 			ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
@@ -1584,9 +1624,9 @@ void TutorialApp::UpdateImGUI()
 			// ── ShadowMap Preview / Grid ────────────────────────────────
 			ImGui::Checkbox("Show ShadowMap", &mShUI.showSRV);
 			ImGui::Checkbox("Show Grid", &mDbg.showGrid);
-			ImGui::Checkbox("Use Orthographic", &mShUI.useOrtho);		
+			ImGui::Checkbox("Use Orthographic", &mShUI.useOrtho);
 			ImGui::Checkbox("Use followCamera", &mShUI.followCamera);
-			
+
 			if (mShUI.showSRV) {
 				ImTextureID id = (ImTextureID)mShadowSRV.Get();
 				if (id) ImGui::Image(id, ImVec2(256, 256), ImVec2(0, 0), ImVec2(1, 1));

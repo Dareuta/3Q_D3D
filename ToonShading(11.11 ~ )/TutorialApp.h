@@ -256,6 +256,12 @@ private:
 		bool showGrid = true;
 
 		float alphaCut = 0.4f;
+
+		bool useToon = true;
+		bool toonHalfLambert = true;
+		float toonSpecStep = 0.55f;
+		float toonSpecBoost = 1.0f;
+		float toonShadowMin = 0.02f;
 	};
 
 	static Matrix ComposeSRT(const XformUI& xf) {
@@ -315,4 +321,19 @@ private:
 	bool   mBox_Play = true; // 재생/정지
 	bool   mBox_Loop = true; // 루프
 	float  mBox_Speed = 1.0f; // 재생 배수(음수=역재생)
+
+	//툰 쉐이딩
+	// Toon ramp
+	ID3D11ShaderResourceView* m_pRampSRV = nullptr; // PS t6
+	ID3D11Buffer* m_pToonCB = nullptr; // PS b7
+
+	struct ToonCB_ {
+		UINT  useToon;
+		UINT  halfLambert;
+		float specStep;
+		float specBoost;
+		float shadowMin;
+		float pad0, pad1, pad2; // 16B 정렬
+	};
+
 };
